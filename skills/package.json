@@ -1,0 +1,10 @@
+{
+  "name": "clawsql-skills",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ClawSQL OpenClaw Skills — MySQL cluster management tools",
+  "dependencies": {
+    "mysql2": "^3.11.0"
+  }
+}

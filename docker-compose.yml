@@ -1,0 +1,163 @@
+version: "3.8"
+
+# ═══════════════════════════════════════════════════════
+#  ClawSQL MVP — OpenClaw + Orchestrator + ProxySQL
+#
+#  Architecture:
+#    Orchestrator ──hook──► OpenClaw ──skill──► ProxySQL
+#                                   ──skill──► Orchestrator
+# ═══════════════════════════════════════════════════════
+
+services:
+
+  # ─── MySQL Primary ───
+  mysql-primary:
+    image: mysql:8.0
+    container_name: clawsql-primary
+    hostname: mysql-primary
+    environment:
+      MYSQL_ROOT_PASSWORD: root_pass
+    volumes:
+      - ./config/mysql/primary.cnf:/etc/mysql/conf.d/clawsql.cnf
+      - ./config/mysql/init-primary.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - primary_data:/var/lib/mysql
+    ports:
+      - "3307:3306"
+    networks:
+      - clawsql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot_pass"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # ─── MySQL Replica 1 ───
+  mysql-replica-1:
+    image: mysql:8.0
+    container_name: clawsql-replica-1
+    hostname: mysql-replica-1
+    environment:
+      MYSQL_ROOT_PASSWORD: root_pass
+    volumes:
+      - ./config/mysql/replica.cnf:/etc/mysql/conf.d/clawsql.cnf
+      - ./config/mysql/init-replica.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - replica1_data:/var/lib/mysql
+    ports:
+      - "3308:3306"
+    depends_on:
+      mysql-primary:
+        condition: service_healthy
+    networks:
+      - clawsql
+
+  # ─── MySQL Replica 2 ───
+  mysql-replica-2:
+    image: mysql:8.0
+    container_name: clawsql-replica-2
+    hostname: mysql-replica-2
+    environment:
+      MYSQL_ROOT_PASSWORD: root_pass
+    volumes:
+      - ./config/mysql/replica.cnf:/etc/mysql/conf.d/clawsql.cnf
+      - ./config/mysql/init-replica.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - replica2_data:/var/lib/mysql
+    command: --server-id=202 --report-host=mysql-replica-2
+    ports:
+      - "3309:3306"
+    depends_on:
+      mysql-primary:
+        condition: service_healthy
+    networks:
+      - clawsql
+
+  # ─── Orchestrator Backend DB ───
+  orchestrator-db:
+    image: mysql:8.0
+    container_name: clawsql-orch-db
+    environment:
+      MYSQL_ROOT_PASSWORD: root_pass
+      MYSQL_DATABASE: orchestrator
+      MYSQL_USER: orchestrator
+      MYSQL_PASSWORD: orch_db_pass
+    volumes:
+      - orch_db_data:/var/lib/mysql
+    networks:
+      - clawsql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot_pass"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # ─── Orchestrator ───
+  orchestrator:
+    image: openarkcode/orchestrator:latest
+    container_name: clawsql-orchestrator
+    hostname: orchestrator
+    volumes:
+      - ./config/orchestrator/orchestrator.conf.json:/etc/orchestrator.conf.json
+    ports:
+      - "3000:3000"
+    depends_on:
+      orchestrator-db:
+        condition: service_healthy
+      mysql-primary:
+        condition: service_healthy
+    networks:
+      - clawsql
+
+  # ─── ProxySQL ───
+  proxysql:
+    image: proxysql/proxysql:2.6.3
+    container_name: clawsql-proxysql
+    hostname: proxysql
+    volumes:
+      - ./config/proxysql/proxysql.cnf:/etc/proxysql.cnf
+    ports:
+      - "6033:6033"
+      - "6032:6032"
+    depends_on:
+      mysql-primary:
+        condition: service_healthy
+    networks:
+      - clawsql
+
+  # ─── OpenClaw ───
+  # Mount the skills directory into OpenClaw's workspace.
+  # OpenClaw receives webhooks from Orchestrator and uses
+  # Skills to manage ProxySQL and Orchestrator.
+  #
+  # Replace the image with your OpenClaw deployment:
+  openclaw:
+    image: ${OPENCLAW_IMAGE:-openclaw/openclaw:latest}
+    container_name: clawsql-openclaw
+    hostname: openclaw
+    environment:
+      # OpenClaw config
+      OPENCLAW_PORT: 3000
+      # Cluster endpoints (available to all skills)
+      ORCHESTRATOR_URL: http://orchestrator:3000
+      PROXYSQL_HOST: proxysql
+      PROXYSQL_PORT: 6032
+      PROXYSQL_USER: admin
+      PROXYSQL_PASSWORD: admin_pass
+      CLUSTER_ALIAS: clawsql-demo
+    volumes:
+      - ./skills:/app/workspace/skills
+    ports:
+      - "3100:3000"
+    depends_on:
+      - orchestrator
+      - proxysql
+    networks:
+      - clawsql
+
+volumes:
+  primary_data:
+  replica1_data:
+  replica2_data:
+  orch_db_data:
+
+networks:
+  clawsql:
+    driver: bridge

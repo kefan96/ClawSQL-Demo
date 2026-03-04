@@ -1,0 +1,32 @@
+{
+  "Debug":                          false,
+  "EnableSyslog":                   false,
+  "ListenAddress":                  ":3000",
+
+  "MySQLTopologyUser":              "orchestrator",
+  "MySQLTopologyPassword":          "orch_pass",
+
+  "MySQLOrchestratorHost":          "orchestrator-db",
+  "MySQLOrchestratorPort":          3306,
+  "MySQLOrchestratorDatabase":      "orchestrator",
+  "MySQLOrchestratorUser":          "orchestrator",
+  "MySQLOrchestratorPassword":      "orch_db_pass",
+
+  "InstancePollSeconds":            5,
+  "DiscoverByShowSlaveHosts":       true,
+  "AutoDiscoverWriteOrchestratorInstance": true,
+
+  "RecoveryPeriodBlockSeconds":     60,
+  "RecoverMasterClusterFilters":    ["*"],
+  "RecoverIntermediateMasterClusterFilters": ["*"],
+
+  "MySQLHostnameResolveMethod":     "none",
+
+  "PostFailoverProcesses": [
+    "curl -sS -X POST http://openclaw:3000/hooks/agent -H 'Content-Type: application/json' -d '{\"skill\":\"mysql-failover\",\"failureType\":\"{failureType}\",\"failureDescription\":\"{failureDescription}\",\"failedHost\":\"{failedHost}\",\"failedPort\":{failedPort},\"failureCluster\":\"{failureCluster}\",\"failureClusterAlias\":\"{failureClusterAlias}\",\"countReplicas\":{countReplicas},\"isDowntimed\":{isDowntimed},\"isMaster\":{isMaster},\"successorHost\":\"{successorHost}\",\"successorPort\":{successorPort},\"successorAlias\":\"{successorAlias}\",\"isSuccessful\":{isSuccessful},\"lostReplicas\":\"{lostReplicas}\",\"recoveryUID\":\"{recoveryUID}\"}'"
+  ],
+
+  "PostUnsuccessfulFailoverProcesses": [
+    "curl -sS -X POST http://openclaw:3000/hooks/agent -H 'Content-Type: application/json' -d '{\"skill\":\"mysql-failover\",\"failureType\":\"{failureType}\",\"failedHost\":\"{failedHost}\",\"failedPort\":{failedPort},\"failureCluster\":\"{failureCluster}\",\"failureClusterAlias\":\"{failureClusterAlias}\",\"isSuccessful\":false,\"isMaster\":{isMaster}}'"
+  ]
+}
