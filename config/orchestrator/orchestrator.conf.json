@@ -5,6 +5,7 @@
 
   "MySQLTopologyUser":              "orchestrator",
   "MySQLTopologyPassword":          "orch_pass",
+  "MySQLTopologySSLMode":           "skip-verify",
 
   "MySQLOrchestratorHost":          "orchestrator-db",
   "MySQLOrchestratorPort":          3306,
@@ -23,10 +24,10 @@
   "MySQLHostnameResolveMethod":     "none",
 
   "PostFailoverProcesses": [
-    "curl -sS -X POST http://openclaw:3000/hooks/agent -H 'Content-Type: application/json' -d '{\"skill\":\"mysql-failover\",\"failureType\":\"{failureType}\",\"failureDescription\":\"{failureDescription}\",\"failedHost\":\"{failedHost}\",\"failedPort\":{failedPort},\"failureCluster\":\"{failureCluster}\",\"failureClusterAlias\":\"{failureClusterAlias}\",\"countReplicas\":{countReplicas},\"isDowntimed\":{isDowntimed},\"isMaster\":{isMaster},\"successorHost\":\"{successorHost}\",\"successorPort\":{successorPort},\"successorAlias\":\"{successorAlias}\",\"isSuccessful\":{isSuccessful},\"lostReplicas\":\"{lostReplicas}\",\"recoveryUID\":\"{recoveryUID}\"}'"
+    "curl -sS -X POST http://openclaw:18789/hooks/agent -H 'Content-Type: application/json' -H 'Authorization: Bearer clawsql-webhook-secret' -d '{\"skill\":\"mysql-failover\",\"failureType\":\"{failureType}\",\"failureDescription\":\"{failureDescription}\",\"failedHost\":\"{failedHost}\",\"failedPort\":{failedPort},\"failureCluster\":\"{failureCluster}\",\"failureClusterAlias\":\"{failureClusterAlias}\",\"countReplicas\":{countReplicas},\"isDowntimed\":{isDowntimed},\"isMaster\":{isMaster},\"successorHost\":\"{successorHost}\",\"successorPort\":{successorPort},\"successorAlias\":\"{successorAlias}\",\"isSuccessful\":{isSuccessful},\"lostReplicas\":\"{lostReplicas}\",\"recoveryUID\":\"{recoveryUID}\"}'"
   ],
 
   "PostUnsuccessfulFailoverProcesses": [
-    "curl -sS -X POST http://openclaw:3000/hooks/agent -H 'Content-Type: application/json' -d '{\"skill\":\"mysql-failover\",\"failureType\":\"{failureType}\",\"failedHost\":\"{failedHost}\",\"failedPort\":{failedPort},\"failureCluster\":\"{failureCluster}\",\"failureClusterAlias\":\"{failureClusterAlias}\",\"isSuccessful\":false,\"isMaster\":{isMaster}}'"
+    "curl -sS -X POST http://openclaw:18789/hooks/agent -H 'Content-Type: application/json' -H 'Authorization: Bearer clawsql-webhook-secret' -d '{\"skill\":\"mysql-failover\",\"failureType\":\"{failureType}\",\"failedHost\":\"{failedHost}\",\"failedPort\":{failedPort},\"failureCluster\":\"{failureCluster}\",\"failureClusterAlias\":\"{failureClusterAlias}\",\"isSuccessful\":false,\"isMaster\":{isMaster}}'"
   ]
 }

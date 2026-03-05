@@ -80,6 +80,20 @@ export async function setServerStatus(hostname, port, hostgroup, status) {
 }
 
 /**
+ * Update server hostgroup (for switchover)
+ */
+export async function updateServerHostgroup(hostname, port, fromHostgroup, toHostgroup) {
+  await execute(
+    `DELETE FROM mysql_servers WHERE hostname='${hostname}' AND port=${port} AND hostgroup_id=${fromHostgroup}`
+  );
+  await execute(
+    `REPLACE INTO mysql_servers (hostgroup_id, hostname, port, weight, max_connections)
+     VALUES (${toHostgroup}, '${hostname}', ${port}, 1000, 200)`
+  );
+  await loadServers();
+}
+
+/**
  * Atomic writer switch:
  *   1. Remove old writer from HG_WRITER
  *   2. Add old writer to HG_READER
@@ -88,7 +102,7 @@ export async function setServerStatus(hostname, port, hostgroup, status) {
  *   5. Load to runtime + save to disk
  */
 export async function switchWriter(oldHost, oldPort, newHost, newPort) {
-  // Step 1: remove old writer
+  // Step 1: remove old writer from HG_WRITER
   await execute(
     `DELETE FROM mysql_servers WHERE hostname='${oldHost}' AND port=${oldPort} AND hostgroup_id=${HG_WRITER}`
   );

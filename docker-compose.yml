@@ -40,7 +40,6 @@ services:
       MYSQL_ROOT_PASSWORD: root_pass
     volumes:
       - ./config/mysql/replica.cnf:/etc/mysql/conf.d/clawsql.cnf
-      - ./config/mysql/init-replica.sql:/docker-entrypoint-initdb.d/01-init.sql
       - replica1_data:/var/lib/mysql
     ports:
       - "3308:3306"
@@ -59,7 +58,6 @@ services:
       MYSQL_ROOT_PASSWORD: root_pass
     volumes:
       - ./config/mysql/replica.cnf:/etc/mysql/conf.d/clawsql.cnf
-      - ./config/mysql/init-replica.sql:/docker-entrypoint-initdb.d/01-init.sql
       - replica2_data:/var/lib/mysql
     command: --server-id=202 --report-host=mysql-replica-2
     ports:
@@ -126,15 +124,17 @@ services:
   # Mount the skills directory into OpenClaw's workspace.
   # OpenClaw receives webhooks from Orchestrator and uses
   # Skills to manage ProxySQL and Orchestrator.
-  #
-  # Replace the image with your OpenClaw deployment:
   openclaw:
-    image: ${OPENCLAW_IMAGE:-openclaw/openclaw:latest}
+    image: alpine/openclaw:latest
     container_name: clawsql-openclaw
     hostname: openclaw
     environment:
       # OpenClaw config
-      OPENCLAW_PORT: 3000
+      OPENCLAW_PORT: 18789
+      OPENCLAW_HOST: 0.0.0.0
+      # Anthropic API key (required for AI processing)
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
       # Cluster endpoints (available to all skills)
       ORCHESTRATOR_URL: http://orchestrator:3000
       PROXYSQL_HOST: proxysql
@@ -144,8 +144,9 @@ services:
       CLUSTER_ALIAS: clawsql-demo
     volumes:
       - ./skills:/app/workspace/skills
+      - ./config/openclaw:/home/node/.openclaw
     ports:
-      - "3100:3000"
+      - "3100:18789"
     depends_on:
       - orchestrator
       - proxysql
@@ -157,6 +158,7 @@ volumes:
   replica1_data:
   replica2_data:
   orch_db_data:
+  openclaw_config:
 
 networks:
   clawsql:

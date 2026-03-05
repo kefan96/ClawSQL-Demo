@@ -8,18 +8,22 @@
 const ORCH_BASE = process.env.ORCHESTRATOR_URL || 'http://orchestrator:3000';
 const TIMEOUT   = 10_000;
 
-async function orch(path, method = 'GET') {
+async function orch(path, method = 'GET', body = null) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT);
   try {
-    const res = await fetch(`${ORCH_BASE}${path}`, {
+    const options = {
       method,
       headers: { 'Content-Type': 'application/json' },
       signal: ctrl.signal,
-    });
+    };
+    if (body) {
+      options.body = JSON.stringify(body);
+    }
+    const res = await fetch(`${ORCH_BASE}${path}`, options);
     if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      throw new Error(`Orchestrator ${method} ${path} → ${res.status}: ${body}`);
+      const bodyText = await res.text().catch(() => '');
+      throw new Error(`Orchestrator ${method} ${path} → ${res.status}: ${bodyText}`);
     }
     return await res.json();
   } finally {
@@ -73,8 +77,16 @@ export async function forceMasterFailover(alias) {
   return orch(`/api/force-master-failover/${encodeURIComponent(alias)}`);
 }
 
-export async function gracefulMasterTakeover(alias, host, port) {
-  return orch(`/api/graceful-master-takeover/${encodeURIComponent(alias)}/${host}/${port}`);
+export async function gracefulMasterTakeover(alias, target = {}) {
+  // Support object-style arguments for auto takeover
+  if (typeof target === 'object') {
+    const { targetHost, targetPort } = target;
+    return orch(`/api/graceful-master-takeover-auto/${encodeURIComponent(alias)}`, 'POST', {
+      targetHost,
+      targetPort,
+    });
+  }
+  return orch(`/api/graceful-master-takeover/${encodeURIComponent(alias)}/${target}`);
 }
 
 export async function ackRecovery(uid, comment) {

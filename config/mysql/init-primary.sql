@@ -1,8 +1,9 @@
 -- init-primary.sql
 -- Users for replication, orchestrator, proxysql monitor, and application
 
-CREATE USER IF NOT EXISTS 'repl'@'%' IDENTIFIED BY 'repl_pass';
-GRANT REPLICATION SLAVE ON *.* TO 'repl'@'%';
+-- Replication user with mysql_native_password for compatibility
+CREATE USER IF NOT EXISTS 'repl'@'%' IDENTIFIED WITH mysql_native_password BY 'repl_pass';
+GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'repl'@'%';
 
 CREATE USER IF NOT EXISTS 'orchestrator'@'%' IDENTIFIED BY 'orch_pass';
 GRANT SUPER, PROCESS, REPLICATION SLAVE, REPLICATION CLIENT, RELOAD ON *.* TO 'orchestrator'@'%';
