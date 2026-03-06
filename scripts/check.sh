@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_DIR"
 
-OPENCLAW_URL="http://localhost:3100"
+OPENCLAW_URL="http://localhost:18789"
 WEBHOOK_SECRET="clawsql-webhook-secret"
 ORCH_URL="http://localhost:3000"
 

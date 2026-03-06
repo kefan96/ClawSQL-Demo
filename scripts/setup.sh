@@ -111,17 +111,16 @@ if [[ -n "${DASHSCOPE_API_KEY:-}" ]]; then
   cat > "$PROJECT_DIR/config/openclaw/openclaw.json" << EOF
 {
   "commands": {"native": "auto", "nativeSkills": "auto", "restart": true, "ownerDisplay": "raw"},
-  "gateway": {"mode": "local", "bind": "lan", "port": 18789, "auth": {"mode": "token", "token": "clawsql-token"}},
+  "gateway": {"mode": "local", "bind": "lan", "port": 18789, "auth": {"mode": "token", "token": "clawsql-token"}, "controlUi": {"allowedOrigins": ["http://localhost:18789", "http://127.0.0.1:18789"]}},
   "models": {
     "providers": {
       "dashscope": {
         "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "api": "openai-completions",
         "apiKey": "${DASHSCOPE_API_KEY}",
-        "models": [{"id": "qwen-plus", "name": "Qwen Plus", "input": ["text"], "reasoning": false, "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}, "contextWindow": 131072}]
+        "models": [{"id": "qwen-plus", "name": "Qwen Plus", "input": ["text"], "reasoning": false}]
       }
-    },
-    "defaultModel": "dashscope/qwen-plus"
+    }
   },
   "hooks": {
     "enabled": true, "token": "clawsql-webhook-secret", "path": "/hooks",
@@ -137,8 +136,8 @@ elif [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
   cat > "$PROJECT_DIR/config/openclaw/openclaw.json" << EOF
 {
   "commands": {"native": "auto", "nativeSkills": "auto", "restart": true, "ownerDisplay": "raw"},
-  "gateway": {"mode": "local", "bind": "lan", "port": 18789, "auth": {"mode": "token", "token": "clawsql-token"}},
-  "models": {"defaultModel": "claude-sonnet-4-6"},
+  "gateway": {"mode": "local", "bind": "lan", "port": 18789, "auth": {"mode": "token", "token": "clawsql-token"}, "controlUi": {"allowedOrigins": ["http://localhost:18789", "http://127.0.0.1:18789"]}},
+  "models": {},
   "hooks": {
     "enabled": true, "token": "clawsql-webhook-secret", "path": "/hooks",
     "maxBodyBytes": 262144, "defaultSessionKey": "hook:orchestrator",
@@ -163,7 +162,7 @@ echo "║  Replica 2:      localhost:3309           ║"
 echo "║  ProxySQL:       localhost:6033 (mysql)   ║"
 echo "║  ProxySQL Admin: localhost:6032           ║"
 echo "║  Orchestrator:   http://localhost:3000    ║"
-echo "║  OpenClaw:       http://localhost:3100    ║"
+echo "║  OpenClaw:       http://localhost:18789    ║"
 echo "╠══════════════════════════════════════════╣"
 echo "║  Run: bash scripts/check.sh              ║"
 echo "║  Demo: bash scripts/demo.sh              ║"

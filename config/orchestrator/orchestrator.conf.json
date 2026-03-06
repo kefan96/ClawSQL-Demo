@@ -19,6 +19,6 @@
   "ActiveNodeExpireSeconds": 60,
   "AvoidActiveNodeAutoReelections": true,
   "PostFailoverProcesses": [
-    "curl -sS -X POST http://openclaw:18789/hooks/agent -H 'Content-Type: application/json' -H 'Authorization: Bearer clawsql-webhook-secret' -d '{\"skill\":\"mysql-failover\"}'"
+    "curl -sS -X POST http://openclaw:18789/hooks/agent -H 'Content-Type: application/json' -H 'Authorization: Bearer clawsql-webhook-secret' -d '{\"skill\":\"mysql-failover\",\"request\":\"failover webhook received\"}'"
   ]
 }
