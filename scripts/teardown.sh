@@ -7,7 +7,20 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_DIR"
 
-echo "Stopping and removing ClawSQL containers..."
-docker compose down -v
+echo "╔══════════════════════════════════════════╗"
+echo "║        ClawSQL — Teardown                ║"
+echo "╚══════════════════════════════════════════╝"
+echo ""
 
-echo "✓ All containers and volumes removed"
+echo "▶ Stopping and removing containers..."
+# --remove-orphans ensures containers not in compose file are also removed
+docker compose down -v --remove-orphans
+
+echo ""
+echo "▶ Removing any dangling networks..."
+docker network rm clawsql-demo_clawsql 2>/dev/null || true
+
+echo ""
+echo "╔══════════════════════════════════════════╗"
+echo "║         Teardown Complete!               ║"
+echo "╚══════════════════════════════════════════╝"

@@ -1,53 +1,48 @@
 #!/usr/bin/env bash
 
 # ═══════════════════════════════════════════════════════
-#  ClawSQL Demo: Quick Health Check
+#  ClawSQL Demo: Quick Health Check — OpenClaw Native
 # ═══════════════════════════════════════════════════════
+#  This script shows how to request health checks via OpenClaw.
+#  All analysis is done by OpenClaw, not direct commands.
+
+OPENCLAW_URL="http://localhost:3100"
+WEBHOOK_SECRET="clawsql-webhook-secret"
 
 echo "╔════════════════════════════════════════════════════════╗"
-echo "║  ClawSQL Demo: Cluster Health Check                    ║"
+echo "║  ClawSQL Demo: Health Check via OpenClaw               ║"
 echo "╚════════════════════════════════════════════════════════╝"
 echo ""
 
-# Get Orchestrator topology
-echo "📊 Cluster Topology from Orchestrator:"
-TOPOLOGY=$(curl -sf "http://localhost:3000/api/clusters" 2>/dev/null || echo '[]')
-echo "   Clusters: $TOPOLOGY"
+echo "📊 Requesting health check from OpenClaw..."
+echo ""
+echo "This request goes through OpenClaw — the only interface."
 echo ""
 
-# Get ProxySQL status
-echo "📊 ProxySQL Server Status:"
-docker exec clawsql-proxysql mysql -h127.0.0.1 -P6032 -uadmin -padmin_pass -e "SELECT hostgroup_id, hostname, port, status FROM mysql_servers ORDER BY hostgroup_id, hostname;" 2>&1 | grep -v "Emulate\|Warning\|>>>>" || echo "   Could not fetch ProxySQL status"
-echo ""
+RESPONSE=$(curl -sf -X POST "$OPENCLAW_URL/hooks/agent" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $WEBHOOK_SECRET" \
+  -d '{"skill":"mysql-health","request":"check cluster health, analyze replication status, and report findings"}' 2>/dev/null)
 
-# Get replication status
-echo "📊 Replication Status:"
-docker exec clawsql-replica-1 mysql -uroot -proot_pass -e "SHOW SLAVE STATUS\G" 2>&1 | grep -E "Slave_(IO|SQL)_Running|Seconds_Behind_Master" | awk '{print "   clawsql-replica-1: "$1, $2}' | head -3
-docker exec clawsql-replica-2 mysql -uroot -proot_pass -e "SHOW SLAVE STATUS\G" 2>&1 | grep -E "Slave_(IO|SQL)_Running|Seconds_Behind_Master" | awk '{print "   clawsql-replica-2: "$1, $2}' | head -3
-echo ""
+if [ -n "$RESPONSE" ]; then
+  echo "Response from OpenClaw:"
+  echo "$RESPONSE" | python3 -m json.tool 2>/dev/null || echo "$RESPONSE"
+else
+  echo "⚠️  OpenClaw did not respond. Make sure it's running at $OPENCLAW_URL"
+  echo ""
+  echo "To start OpenClaw:"
+  echo "  docker compose up -d openclaw"
+fi
 
-# Summary
-echo "╔════════════════════════════════════════════════════════╗"
-echo "║  Interact with OpenClaw AI Agent                       ║"
-echo "╚════════════════════════════════════════════════════════╝"
 echo ""
-echo "Send a webhook to OpenClaw for AI-powered analysis:"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "  # Health check request:"
-echo "  curl -X POST http://localhost:3100/hooks/agent \\"
-echo "    -H 'Content-Type: application/json' \\"
-echo "    -H 'Authorization: Bearer clawsql-webhook-secret' \\"
-echo "    -d '{\"skill\":\"mysql-health\",\"request\":\"check cluster health\"}'"
+echo "💡 For the full analysis, check the OpenClaw UI at:"
+echo "   $OPENCLAW_URL"
 echo ""
-echo "  # Topology request:"
-echo "  curl -X POST http://localhost:3100/hooks/agent \\"
-echo "    -H 'Content-Type: application/json' \\"
-echo "    -H 'Authorization: Bearer clawsql-webhook-secret' \\"
-echo "    -d '{\"skill\":\"mysql-topology\",\"request\":\"show replication topology\"}'"
-echo ""
-echo "  # Switchover demo (promotes replica-1):"
-echo "  bash scripts/demo-actions/demo-switchover.sh"
-echo ""
-echo "  # Full interactive menu:"
-echo "  bash scripts/demo-runner.sh"
+echo "OpenClaw will:"
+echo "  1. Fetch topology from Orchestrator"
+echo "  2. Check replication status on all replicas"
+echo "  3. Verify ProxySQL routing"
+echo "  4. Provide AI-powered analysis and recommendations"
 echo ""

@@ -1,19 +1,21 @@
 # ClawSQL
 
-**OpenClaw + Orchestrator + ProxySQL — AI-Driven MySQL Cluster Management**
+**AI-Driven MySQL Cluster Management with OpenClaw + Orchestrator + ProxySQL**
 
-ClawSQL 是一个开源 demo 项目，演示如何用 OpenClaw 的 Skill 机制将 Orchestrator 的故障恢复事件与 ProxySQL 的流量路由串联起来，让 AI 作为 MySQL 集群的运维控制面。
+ClawSQL is an open-source demo project showing how to use OpenClaw's Skill mechanism to coordinate Orchestrator's failover events with ProxySQL's traffic routing, making AI the operational control plane for MySQL clusters.
 
-项目本身不包含独立 daemon。OpenClaw 就是控制面，四个 Skill 就是全部执行逻辑。
+The project itself contains no daemon. OpenClaw is the control plane, and four Skills comprise all the execution logic.
+
+**默认使用 Alibaba DashScope (Qwen 模型) 作为 AI 提供者。**
 
 ---
 
-## 架构
+## Architecture
 
-### 整体部署
+### Deployment Diagram
 
 ```
-docker-compose.yml — 7 个容器，1 个 bridge 网络 (clawsql)
+docker-compose.yml — 7 containers, 1 bridge network (clawsql)
 
 ┌──────────────────────────────────────────────────────────────────┐
 │                        clawsql network                           │
@@ -38,39 +40,40 @@ docker-compose.yml — 7 个容器，1 个 bridge 网络 (clawsql)
 │                               ▼                                  │
 │                      ┌─────────────────┐                        │
 │                      │    openclaw     │                        │
-│                      │  :3000          │                        │
+│                      │  (gateway)      │                        │
+│                      │  :3100          │                        │
 │                      │  skills mounted │                        │
 │                      └─────────────────┘                        │
 └──────────────────────────────────────────────────────────────────┘
 
-宿主机端口映射：
+Host port mapping:
   3307 → mysql-primary:3306
   3308 → mysql-replica-1:3306
   3309 → mysql-replica-2:3306
   3000 → orchestrator:3000    (Web UI + REST API)
-  6033 → proxysql:6033        (应用连接入口)
+  6033 → proxysql:6033        (Application entry point)
   6032 → proxysql:6032        (Admin SQL)
-  3100 → openclaw:3000        (OpenClaw UI)
+  3100 → openclaw:3100        (OpenClaw Gateway - loopback)
 ```
 
-### 故障转移数据流
+### Failover Data Flow
 
-这是项目的核心路径——从故障检测到路由切换的完整链路：
+The core path from failure detection to traffic routing:
 
 ```
-  mysql-primary 宕机
+  mysql-primary crashes
         │
         ▼
   Orchestrator (InstancePollSeconds=5)
-  检测到 DeadMaster
+  Detects DeadMaster
         │
         ▼
-  Orchestrator 执行内置恢复逻辑
-  选举 replica → CHANGE MASTER TO → SET read_only=0
+  Orchestrator executes built-in recovery
+  Elects replica → CHANGE MASTER TO → SET read_only=0
         │
         ▼
-  PostFailoverProcesses 触发
-  curl -X POST http://openclaw:18789/hooks/agent
+  PostFailoverProcesses triggers webhook
+  POST http://openclaw:3100/hooks/agent
   payload:
   ┌──────────────────────────────────────┐
   │ {                                    │
@@ -87,11 +90,11 @@ docker-compose.yml — 7 个容器，1 个 bridge 网络 (clawsql)
   └──────────────┬───────────────────────┘
                  │
                  ▼
-  OpenClaw 加载 mysql-failover Skill
-  AI 读取 SKILL.md 中的 Decision Logic
+  OpenClaw loads mysql-failover Skill
+  AI reads Decision Logic from SKILL.md
         │
         ▼
-  AI 按决策树调用 handler.mjs 中的 tools：
+  AI calls tools from handler.mjs based on decision tree:
   ┌──────────────────────────────────────────────────┐
   │ 1. get_proxysql_servers()                        │
   │    → SELECT * FROM mysql_servers (via 6032)      │
@@ -101,7 +104,7 @@ docker-compose.yml — 7 个容器，1 个 bridge 网络 (clawsql)
   │      "mysql-replica-1", 3306                     │
   │    )                                             │
   │    → DELETE old writer from HG 10                │
-  │    → REPLACE old writer into HG 20 (变为reader)  │
+  │    → REPLACE old writer into HG 20 (becomes reader)│
   │    → DELETE new writer from HG 20                │
   │    → REPLACE new writer into HG 10               │
   │    → LOAD MYSQL SERVERS TO RUNTIME               │
@@ -112,21 +115,21 @@ docker-compose.yml — 7 个容器，1 个 bridge 网络 (clawsql)
   │    → LOAD + SAVE                                 │
   │                                                  │
   │ 4. verify_routing()                              │
-  │    → 检查 HG10 有且仅有 1 个 ONLINE writer      │
-  │    → 检查 HG20 至少有 1 个 ONLINE reader         │
-  │    → 返回 issues 列表                            │
+  │    → Check HG10 has exactly 1 ONLINE writer      │
+  │    → Check HG20 has at least 1 ONLINE reader     │
+  │    → Return issues list                          │
   └──────────────────────────────────────────────────┘
         │
         ▼
-  ProxySQL 路由已更新
-  应用通过 :6033 的连接自动路由到新 primary
+  ProxySQL routing updated
+  Applications via :6033 automatically route to new primary
 ```
 
-### Skill 与组件交互
+### Skill and Component Interaction
 
 ```
                         ┌──────────────────────────────────┐
-                        │           OpenClaw                │
+                        │           OpenClaw               │
                         │                                  │
    Orchestrator         │   ┌──────────────────────────┐   │
    PostFailover    ─────┼──►│  mysql-failover          │   │
@@ -135,19 +138,19 @@ docker-compose.yml — 7 个容器，1 个 bridge 网络 (clawsql)
                         │   └─────────┬────────────────┘   │
                         │             │                    │
    cron */5 * * * *     │   ┌─────────▼────────────────┐   │
-   (OpenClaw 内部) ─────┼──►│  mysql-health            │   │
+   (internal)      ─────┼──►│  mysql-health            │   │
                         │   │  trigger: cron           │   │
                         │   │  4 tools                 │   │
                         │   └─────────┬────────────────┘   │
                         │             │                    │
-   用户在 OpenClaw      │   ┌─────────▼────────────────┐   │
-   对话中提问  ─────────┼──►│  mysql-topology          │   │
+   User chat in         │   ┌─────────▼────────────────┐   │
+   OpenClaw UI   ───────┼──►│  mysql-topology          │   │
                         │   │  trigger: chat           │   │
                         │   │  6 tools                 │   │
                         │   └─────────┬────────────────┘   │
                         │             │                    │
-   用户在 OpenClaw      │   ┌─────────▼────────────────┐   │
-   对话中提问  ─────────┼──►│  mysql-traffic           │   │
+   User chat in         │   ┌─────────▼────────────────┐   │
+   OpenClaw UI   ───────┼──►│  mysql-traffic           │   │
                         │   │  trigger: chat           │   │
                         │   │  7 tools                 │   │
                         │   └─────────┬────────────────┘   │
@@ -173,191 +176,191 @@ docker-compose.yml — 7 个容器，1 个 bridge 网络 (clawsql)
 
 ---
 
-## Skill 实现细节
+## Skill Implementation Details
 
 ### mysql-failover
 
-触发方式：Orchestrator 通过 `PostFailoverProcesses` / `PostUnsuccessfulFailoverProcesses` 发送 webhook。
+Trigger: Orchestrator webhook via `PostFailoverProcesses` / `PostUnsuccessfulFailoverProcesses`.
 
-SKILL.md 中定义了三条决策分支，AI 根据 payload 中的 `isMaster` 和 `isSuccessful` 字段选择：
+Three decision branches defined in SKILL.md:
 
-| 场景 | 条件 | AI 执行的 tools |
-|------|------|----------------|
-| 主库故障，恢复成功 | `isMaster=true, isSuccessful=true` | `get_proxysql_servers` → `switch_writer` → `remove_failed_server` → `verify_routing` |
-| 主库故障，恢复失败 | `isMaster=true, isSuccessful=false` | `get_proxysql_servers` → `remove_failed_server` → 报告无 writer |
-| 从库故障 | `isMaster=false` | `remove_failed_server` → `verify_routing` |
+| Scenario | Condition | AI executes |
+|----------|-----------|-------------|
+| Primary failure, recovery success | `isMaster=true, isSuccessful=true` | `get_proxysql_servers` → `switch_writer` → `remove_failed_server` → `verify_routing` |
+| Primary failure, recovery failed | `isMaster=true, isSuccessful=false` | `get_proxysql_servers` → `remove_failed_server` → report no writer |
+| Replica failure | `isMaster=false` | `remove_failed_server` → `verify_routing` |
 
-handler.mjs 中的 5 个 tool 函数：
+5 tool functions in handler.mjs:
 
-| Tool | 作用 | 底层调用 |
-|------|------|---------|
-| `get_proxysql_servers` | 查看当前 ProxySQL 路由表 | `SELECT * FROM mysql_servers` |
-| `switch_writer` | 原子切换 writer（4 步 SQL） | DELETE HG10 → REPLACE HG20 → DELETE HG20 → REPLACE HG10 → LOAD+SAVE |
-| `remove_failed_server` | 从所有 hostgroup 移除故障节点 | `DELETE FROM mysql_servers WHERE hostname=...` → LOAD+SAVE |
-| `verify_routing` | 校验路由一致性 | 查询 mysql_servers，检查 writer 数量、reader 数量 |
-| `get_orchestrator_topology` | 交叉验证 Orchestrator 拓扑 | `GET /api/cluster/{alias}` |
+| Tool | Purpose | Underlying call |
+|------|---------|-----------------|
+| `get_proxysql_servers` | View current ProxySQL routing table | `SELECT * FROM mysql_servers` |
+| `switch_writer` | Atomic writer switch (4 SQL steps) | DELETE HG10 → REPLACE HG20 → DELETE HG20 → REPLACE HG10 → LOAD+SAVE |
+| `remove_failed_server` | Remove failed node from all hostgroups | `DELETE FROM mysql_servers WHERE hostname=...` → LOAD+SAVE |
+| `verify_routing` | Verify routing consistency | Query mysql_servers, check writer/reader counts |
+| `get_orchestrator_topology` | Cross-validate Orchestrator topology | `GET /api/cluster/{alias}` |
 
 ### mysql-health
 
-触发方式：OpenClaw cron，每 5 分钟执行一次。
+Trigger: OpenClaw cron, every 5 minutes.
 
-SKILL.md 中定义了判定标准：
+Severity levels defined in SKILL.md:
 
-| 级别 | 条件 |
-|------|------|
-| CRITICAL | SQL/IO thread 停止、lag > 30s、ProxySQL 无 writer、组件不可达 |
-| WARNING | lag > 5s、连接使用率 > 80%、有 problems、多 writer |
-| HEALTHY | 以上都不满足 |
+| Level | Conditions |
+|-------|------------|
+| CRITICAL | SQL/IO thread stopped, lag > 30s, no ProxySQL writer, component unreachable |
+| WARNING | lag > 5s, connection usage > 80%, has problems, multiple writers |
+| HEALTHY | None of the above |
 
-handler.mjs 中的 4 个 tool 函数：
+4 tool functions in handler.mjs:
 
-| Tool | 作用 | 底层调用 |
-|------|------|---------|
-| `check_orchestrator_health` | Orchestrator 连通性 | `GET /api/health` |
-| `check_proxysql_health` | ProxySQL 连通性 | `SELECT 1` via 6032 |
-| `check_replication_status` | 拓扑 + 每个 replica 的 lag/thread/gtid/problems | `GET /api/cluster/{alias}` |
-| `check_connection_pool` | ProxySQL 连接池详情 | `SELECT * FROM stats_mysql_connection_pool` |
+| Tool | Purpose | Underlying call |
+|------|---------|-----------------|
+| `check_orchestrator_health` | Orchestrator connectivity | `GET /api/health` |
+| `check_proxysql_health` | ProxySQL connectivity | `SELECT 1` via 6032 |
+| `check_replication_status` | Topology + lag/thread/gtid/problems per replica | `GET /api/cluster/{alias}` |
+| `check_connection_pool` | ProxySQL connection pool stats | `SELECT * FROM stats_mysql_connection_pool` |
 
 ### mysql-topology
 
-触发方式：用户在 OpenClaw 中对话（例如"看一下拓扑"、"发现一个新实例"）。
+Trigger: User chat in OpenClaw (e.g., "show topology", "discover new instance").
 
-handler.mjs 中的 6 个 tool 函数：
+6 tool functions in handler.mjs:
 
-| Tool | 作用 | Orchestrator API |
-|------|------|-----------------|
-| `get_topology` | 完整拓扑树 | `GET /api/cluster/{alias}` |
-| `get_instance_detail` | 单实例详情（UUID、GTID、semi-sync、uptime…） | `GET /api/instance/{host}/{port}` |
-| `discover_instance` | 注册新实例到 Orchestrator | `GET /api/discover/{host}/{port}` |
-| `relocate_instance` | 改变复制拓扑（挂到另一个父节点下） | `GET /api/relocate/{h}/{p}/{bh}/{bp}` |
-| `begin_downtime` | 标记维护窗口（Orchestrator 跳过该实例） | `GET /api/begin-downtime/...` |
-| `end_downtime` | 结束维护窗口 | `GET /api/end-downtime/{h}/{p}` |
+| Tool | Purpose | Orchestrator API |
+|------|---------|------------------|
+| `get_topology` | Full topology tree | `GET /api/cluster/{alias}` |
+| `get_instance_detail` | Single instance details (UUID, GTID, semi-sync, uptime...) | `GET /api/instance/{host}/{port}` |
+| `discover_instance` | Register new instance to Orchestrator | `GET /api/discover/{host}/{port}` |
+| `relocate_instance` | Change replication topology (attach to different parent) | `GET /api/relocate/{h}/{p}/{bh}/{bp}` |
+| `begin_downtime` | Mark maintenance window (Orchestrator skips this instance) | `GET /api/begin-downtime/...` |
+| `end_downtime` | End maintenance window | `GET /api/end-downtime/{h}/{p}` |
 
 ### mysql-traffic
 
-触发方式：用户在 OpenClaw 中对话（例如"查看路由"、"加一个 reader"）。
+Trigger: User chat in OpenClaw (e.g., "view routing", "add a reader").
 
-handler.mjs 中的 7 个 tool 函数：
+7 tool functions in handler.mjs:
 
-| Tool | 作用 | ProxySQL SQL |
-|------|------|-------------|
-| `get_servers` | 当前所有 server 条目 | `SELECT * FROM mysql_servers` |
-| `get_pool_stats` | 连接池实时统计 | `SELECT * FROM stats_mysql_connection_pool` |
-| `get_query_rules` | 查询路由规则列表 | `SELECT * FROM mysql_query_rules` |
-| `add_server` | 添加 server 到指定 hostgroup | `INSERT INTO mysql_servers ...` → LOAD+SAVE |
-| `remove_server` | 移除 server（可指定 hostgroup） | `DELETE FROM mysql_servers ...` → LOAD+SAVE |
-| `switch_writer` | 原子切换 writer | 同 mysql-failover 的 switch_writer |
-| `set_server_status` | 改变 server 状态（ONLINE/OFFLINE_SOFT/OFFLINE_HARD） | `UPDATE mysql_servers SET status=...` → LOAD+SAVE |
+| Tool | Purpose | ProxySQL SQL |
+|------|---------|-------------|
+| `get_servers` | Current all server entries | `SELECT * FROM mysql_servers` |
+| `get_pool_stats` | Connection pool real-time stats | `SELECT * FROM stats_mysql_connection_pool` |
+| `get_query_rules` | Query routing rules list | `SELECT * FROM mysql_query_rules` |
+| `add_server` | Add server to specified hostgroup | `INSERT INTO mysql_servers ...` → LOAD+SAVE |
+| `remove_server` | Remove server (can specify hostgroup) | `DELETE FROM mysql_servers ...` → LOAD+SAVE |
+| `switch_writer` | Atomic writer switch | Same as mysql-failover's switch_writer |
+| `set_server_status` | Change server status (ONLINE/OFFLINE_SOFT/OFFLINE_HARD) | `UPDATE mysql_servers SET status=...` → LOAD+SAVE |
 
 ---
 
-## 共享客户端库
+## Shared Client Libraries
 
-四个 Skill 的 handler 通过 `skills/lib/` 下的两个客户端库操作外部组件：
+Four Skills' handlers operate external components via `skills/lib/`:
 
 ### orchestrator-client.mjs
 
-通过 HTTP `fetch` 调用 Orchestrator REST API。环境变量 `ORCHESTRATOR_URL` 控制地址（默认 `http://orchestrator:3000`）。每次请求 10 秒超时（AbortController）。
+Calls Orchestrator REST API via HTTP `fetch`. Environment variable `ORCHESTRATOR_URL` controls address (default `http://orchestrator:3000`). 10-second timeout per request (AbortController).
 
-导出 15 个函数：`getClusterInstances`, `getClusterInfo`, `getInstance`, `discoverInstance`, `getClusters`, `relocateInstance`, `setReadOnly`, `setWriteable`, `recover`, `forceMasterFailover`, `gracefulMasterTakeover`, `ackRecovery`, `beginDowntime`, `endDowntime`, `getTopology`（便捷封装）, `healthCheck`。
+Exports 15 functions: `getClusterInstances`, `getClusterInfo`, `getInstance`, `discoverInstance`, `getClusters`, `relocateInstance`, `setReadOnly`, `setWriteable`, `recover`, `forceMasterFailover`, `gracefulMasterTakeover`, `ackRecovery`, `beginDowntime`, `endDowntime`, `getTopology` (convenience wrapper), `healthCheck`.
 
 ### proxysql-client.mjs
 
-通过 `mysql2/promise` 连接 ProxySQL Admin 端口（6032）。环境变量 `PROXYSQL_HOST`, `PROXYSQL_PORT`, `PROXYSQL_USER`, `PROXYSQL_PASSWORD` 控制连接参数。连接池上限 3。
+Connects to ProxySQL Admin port (6032) via `mysql2/promise`. Environment variables `PROXYSQL_HOST`, `PROXYSQL_PORT`, `PROXYSQL_USER`, `PROXYSQL_PASSWORD` control connection parameters. Connection pool limit 3.
 
-导出 15 个函数：`getServers`, `getWriters`, `getReaders`, `addServer`, `removeServer`, `setServerStatus`, `switchWriter`（4 步原子操作）, `getPoolStats`, `getActiveConnections`, `getQueryRules`, `loadServers`, `loadQueryRules`, `ping`, `destroy`。常量 `HG_WRITER=10`, `HG_READER=20`, `HG_BACKUP=30`。
+Exports 15 functions: `getServers`, `getWriters`, `getReaders`, `addServer`, `removeServer`, `setServerStatus`, `switchWriter` (4-step atomic operation), `getPoolStats`, `getActiveConnections`, `getQueryRules`, `loadServers`, `loadQueryRules`, `ping`, `destroy`. Constants `HG_WRITER=10`, `HG_READER=20`, `HG_BACKUP=30`.
 
-关键实现——`switchWriter` 的 4 步原子切换：
+Key implementation — `switchWriter` 4-step atomic switch:
 
 ```sql
--- 1. 从 writer 组移除旧主
+-- 1. Remove old primary from writer group
 DELETE FROM mysql_servers WHERE hostname='old' AND port=3306 AND hostgroup_id=10;
--- 2. 旧主降为 reader
+-- 2. Demote old primary to reader
 REPLACE INTO mysql_servers (hostgroup_id,hostname,port,weight,max_connections) VALUES (20,'old',3306,1000,200);
--- 3. 从 reader 组移除新主
+-- 3. Remove new primary from reader group
 DELETE FROM mysql_servers WHERE hostname='new' AND port=3306 AND hostgroup_id=20;
--- 4. 新主升为 writer
+-- 4. Promote new primary to writer
 REPLACE INTO mysql_servers (hostgroup_id,hostname,port,weight,max_connections) VALUES (10,'new',3306,1000,200);
--- 5. 生效 + 持久化
+-- 5. Apply + persist
 LOAD MYSQL SERVERS TO RUNTIME;
 SAVE MYSQL SERVERS TO DISK;
 ```
 
 ---
 
-## 基础设施配置
+## Infrastructure Configuration
 
-### MySQL 集群
+### MySQL Cluster
 
-| 参数 | Primary | Replica-1 | Replica-2 |
-|------|---------|-----------|-----------|
-| server_id | 100 | 201 | 202 (command 覆盖) |
+| Parameter | Primary | Replica-1 | Replica-2 |
+|-----------|---------|-----------|-----------|
+| server_id | 100 | 201 | 202 (command override) |
 | gtid_mode | ON | ON | ON |
 | binlog_format | ROW | ROW | ROW |
 | log_slave_updates | ON | ON | ON |
 | read_only | 0 | 1 | 1 |
 | super_read_only | 0 | 1 | 1 |
-| report_host | mysql-primary | mysql-replica-1 | mysql-replica-2 (command 覆盖) |
+| report_host | mysql-primary | mysql-replica-1 | mysql-replica-2 (command override) |
 
-复制方式：GTID auto-positioning（`MASTER_AUTO_POSITION=1`），replica 启动时自动 `CHANGE MASTER TO` + `START SLAVE`。
+Replication: GTID auto-positioning (`MASTER_AUTO_POSITION=1`), replica automatically executes `CHANGE MASTER TO` + `START SLAVE` on startup.
 
-初始化用户（init-primary.sql 在 primary 上创建，replica 通过复制同步）：
+Initialization users (init-primary.sql creates on primary, replica syncs via replication):
 
-| 用户 | 密码 | 权限 | 用途 |
-|------|------|------|------|
-| `repl` | `repl_pass` | REPLICATION SLAVE | GTID 复制 |
-| `orchestrator` | `orch_pass` | SUPER, PROCESS, REPLICATION SLAVE/CLIENT, RELOAD, SELECT on mysql.slave_master_info | Orchestrator 拓扑发现 |
-| `proxysql_mon` | `mon_pass` | REPLICATION CLIENT | ProxySQL monitor 模块 |
-| `app` | `app_pass` | ALL PRIVILEGES | 应用连接 |
+| User | Password | Privileges | Purpose |
+|------|----------|------------|---------|
+| `repl` | `repl_pass` | REPLICATION SLAVE | GTID replication |
+| `orchestrator` | `orch_pass` | SUPER, PROCESS, REPLICATION SLAVE/CLIENT, RELOAD, SELECT on mysql.slave_master_info | Orchestrator topology discovery |
+| `proxysql_mon` | `mon_pass` | REPLICATION CLIENT | ProxySQL monitor module |
+| `app` | `app_pass` | ALL PRIVILEGES | Application connections |
 
 ### Orchestrator
 
-| 配置项 | 值 | 说明 |
-|--------|---|------|
-| InstancePollSeconds | 5 | 每 5 秒探测一次 MySQL 实例 |
-| RecoveryPeriodBlockSeconds | 60 | 恢复冷却期 60 秒 |
-| RecoverMasterClusterFilters | ["*"] | 允许所有集群自动恢复 |
-| DiscoverByShowSlaveHosts | true | 通过 SHOW SLAVE HOSTS 自动发现 |
-| MySQLHostnameResolveMethod | none | 容器环境下不做 hostname 反解 |
-| 后端 DB | orchestrator-db:3306 | 独立 MySQL 实例存储 Orchestrator 元数据 |
+| Configuration | Value | Description |
+|---------------|-------|-------------|
+| InstancePollSeconds | 5 | Probe MySQL instances every 5 seconds |
+| RecoveryPeriodBlockSeconds | 60 | Recovery cooldown period |
+| RecoverMasterClusterFilters | ["*"] | Allow automatic recovery for all clusters |
+| DiscoverByShowSlaveHosts | true | Auto-discover via SHOW SLAVE HOSTS |
+| MySQLHostnameResolveMethod | none | Skip hostname resolution in container environment |
+| Backend DB | orchestrator-db:3306 | Independent MySQL instance for Orchestrator metadata |
 
-Hooks 配置——Orchestrator 在恢复完成/失败后执行 curl：
+Hooks configuration — Orchestrator executes curl after recovery complete/failed:
 
 ```
 PostFailoverProcesses:
-  → POST http://openclaw:18789/hooks/agent
-  → JSON body with Authorization header: Bearer clawsql-webhook-secret + skill, failureType, failedHost/Port, successorHost/Port, isSuccessful, isMaster 等
+  → POST http://openclaw:3100/hooks/agent
+  → JSON body with Authorization header: Bearer clawsql-webhook-secret + skill, failureType, failedHost/Port, successorHost/Port, isSuccessful, isMaster, etc.
 
 PostUnsuccessfulFailoverProcesses:
-  → 同上，isSuccessful=false
+  → Same as above, isSuccessful=false
 ```
 
 ### ProxySQL
 
-| 配置项 | 值 |
-|--------|---|
-| Admin 端口 | 6032，用户 admin/admin_pass |
-| MySQL 协议端口 | 6033，应用通过此端口连接 |
-| Monitor 用户 | proxysql_mon/mon_pass |
-| monitor_read_only_interval | 1500ms（检测 read_only 变化） |
+| Configuration | Value |
+|---------------|-------|
+| Admin port | 6032, user admin/admin_pass |
+| MySQL protocol port | 6033, application connects via this port |
+| Monitor user | proxysql_mon/mon_pass |
+| monitor_read_only_interval | 1500ms (detect read_only changes) |
 | monitor_ping_interval | 10000ms |
 
-Hostgroup 与 Server 初始配置：
+Hostgroup and Server initial configuration:
 
-| Hostgroup | 用途 | 初始成员 |
-|-----------|------|---------|
-| HG 10 (Writer) | 写入 + SELECT FOR UPDATE | mysql-primary:3306 |
-| HG 20 (Reader) | 普通 SELECT | mysql-replica-1:3306, mysql-replica-2:3306 |
-| HG 30 (Backup) | 预留 | 无 |
+| Hostgroup | Purpose | Initial members |
+|-----------|---------|-----------------|
+| HG 10 (Writer) | Write + SELECT FOR UPDATE | mysql-primary:3306 |
+| HG 20 (Reader) | Regular SELECT | mysql-replica-1:3306, mysql-replica-2:3306 |
+| HG 30 (Backup) | Reserved | None |
 
-Query Rules：
+Query Rules:
 
-| Rule ID | 匹配 | 目标 |
-|---------|-------|------|
+| Rule ID | Match | Destination |
+|---------|-------|-------------|
 | 100 | `^SELECT .* FOR UPDATE$` | HG 10 (writer) |
 | 200 | `^SELECT` | HG 20 (reader) |
 
-Application 用户：`app/app_pass`，default_hostgroup=10（非 SELECT 走 writer）。
+Application user: `app/app_pass`, default_hostgroup=10 (non-SELECT goes to writer).
 
 ---
 
@@ -367,87 +370,93 @@ Application 用户：`app/app_pass`，default_hostgroup=10（非 SELECT 走 writ
 git clone https://github.com/clawsql/clawsql.git
 cd clawsql
 
-# 1. 启动全部 7 个容器
-bash scripts/setup.sh
-#    等待 MySQL healthy → 验证复制 → 发现实例到 Orchestrator → 显示初始状态
+# 1. Set DashScope API key (get from https://help.aliyun.com/zh/model-studio/)
+export DASHSCOPE_API_KEY=sk-your-key-here
 
-# 2. 检查集群健康状态
+# 2. Start all 7 containers
+bash scripts/setup.sh
+#    Wait for MySQL healthy → Verify replication → Discover instances → Show initial state
+
+# 3. Check cluster health
 bash scripts/check-cluster.sh
 
-# 3. 演示故障转移（docker stop primary → 等待 30s → 查看结果）
+# 4. Demo failover (docker stop primary → wait 30s → view results)
 bash scripts/demo-failover.sh
 
-# 4. 清理（删除容器 + volumes）
+# 5. Cleanup (delete containers + volumes)
 bash scripts/teardown.sh
 ```
 
-### 端口速查
+### Port Quick Reference
 
-| 端口 | 服务 | 用途 |
-|------|------|------|
-| 3307 | mysql-primary | MySQL 直连 |
-| 3308 | mysql-replica-1 | MySQL 直连 |
-| 3309 | mysql-replica-2 | MySQL 直连 |
+| Port | Service | Purpose |
+|------|---------|---------|
+| 3307 | mysql-primary | MySQL direct connection |
+| 3308 | mysql-replica-1 | MySQL direct connection |
+| 3309 | mysql-replica-2 | MySQL direct connection |
 | 3000 | orchestrator | Web UI + REST API |
-| 6033 | proxysql | 应用 MySQL 入口（读写分离） |
-| 6032 | proxysql | Admin SQL 接口 |
-| 3100 | openclaw | OpenClaw UI |
+| 6033 | proxysql | Application MySQL entry point (read/write split) |
+| 6032 | proxysql | Admin SQL interface |
+| 3100 | openclaw | OpenClaw Gateway (loopback only) |
 
 ---
 
-## 项目结构
+## Project Structure
 
 ```
 clawsql/
-├── docker-compose.yml                 # 7 容器编排
+├── docker-compose.yml                 # 7-container orchestration
 ├── config/
 │   ├── mysql/
 │   │   ├── primary.cnf                # sid=100, GTID, read_only=0
 │   │   ├── replica.cnf                # sid=201, GTID, read_only=1
-│   │   ├── init-primary.sql           # 4 个用户 + demo 库
+│   │   ├── init-primary.sql           # 4 users + demo database
 │   │   └── init-replica.sql           # CHANGE MASTER TO + START SLAVE
 │   ├── orchestrator/
 │   │   └── orchestrator.conf.json     # poll 5s, hooks → OpenClaw
 │   └── proxysql/
 │       └── proxysql.cnf               # HG10/20, query rules, monitor
 ├── skills/
-│   ├── package.json                   # 依赖：mysql2
+│   ├── package.json                   # dependencies: mysql2
 │   ├── lib/
-│   │   ├── orchestrator-client.mjs    # 15 个函数，fetch → Orchestrator REST
-│   │   ├── proxysql-client.mjs        # 15 个函数，mysql2 → ProxySQL Admin SQL
-│   │   └── utils.mjs                  # 格式化 + 工具函数
+│   │   ├── orchestrator-client.mjs    # 15 functions, fetch → Orchestrator REST
+│   │   ├── proxysql-client.mjs        # 15 functions, mysql2 → ProxySQL Admin SQL
+│   │   └── utils.mjs                  # formatting + utilities
 │   ├── mysql-failover/
-│   │   ├── SKILL.md                   # webhook trigger, 3 条决策分支
-│   │   └── handler.mjs               # 5 tools: switch_writer, verify_routing...
+│   │   ├── SKILL.md                   # webhook trigger, 3 decision branches
+│   │   └── handler.mjs                # 5 tools: switch_writer, verify_routing...
 │   ├── mysql-health/
-│   │   ├── SKILL.md                   # cron */5, CRITICAL/WARNING/HEALTHY 判定
-│   │   └── handler.mjs               # 4 tools: check_replication, check_pool...
+│   │   ├── SKILL.md                   # cron */5, CRITICAL/WARNING/HEALTHY
+│   │   └── handler.mjs                # 4 tools: check_replication, check_pool...
 │   ├── mysql-topology/
-│   │   ├── SKILL.md                   # chat trigger, 拓扑管理
-│   │   └── handler.mjs               # 6 tools: discover, relocate, downtime...
+│   │   ├── SKILL.md                   # chat trigger, topology management
+│   │   └── handler.mjs                # 6 tools: discover, relocate, downtime...
 │   ├── mysql-traffic/
-│   │   ├── SKILL.md                   # chat trigger, 路由管理
-│   │   └── handler.mjs               # 7 tools: add/remove server, switch...
-│   └── mysql-demo/                    # NEW: Interactive demo skill
+│   │   ├── SKILL.md                   # chat trigger, routing management
+│   │   └── handler.mjs                # 7 tools: add/remove server, switch...
+│   └── mysql-demo/                    # Interactive demo skill
 │       ├── SKILL.md                   # chat/webhook trigger, demo actions
-│       └── handler.mjs               # 8 tools: health check, switchover...
+│       └── handler.mjs                # 8 tools: health check, switchover...
 ├── scripts/
-│   ├── setup.sh                       # 启动 + 等待 + 发现 + 验证
-│   ├── demo-failover.sh               # kill primary → 观察恢复 → 检查路由
-│   ├── check-cluster.sh               # 组件健康速查
+│   ├── setup.sh                       # start + wait + discover + verify
+│   ├── demo-failover.sh               # kill primary → observe recovery → check routing
+│   ├── check-cluster.sh               # component health quick check
 │   ├── teardown.sh                    # docker compose down -v
-│   ├── init-openclaw.sh               # 初始化 OpenClaw 配置
+│   ├── init-openclaw.sh               # initialize OpenClaw configuration
 │   ├── demo-runner.sh                 # Interactive demo menu
-│   └── demo-actions/                  # NEW: Demo action scripts
+│   └── demo-actions/                  # Demo action scripts
 │       ├── demo-health-check.sh       # Health check with AI analysis
 │       └── demo-switchover.sh         # Controlled switchover demo
+├── config/openclaw/                   # OpenClaw configuration for ClawSQL
+│   └── openclaw.json                  # DashScope + hooks configuration
 ├── .env.example
 ├── .gitignore
 └── README.md
 ```
-## RDS MySQL 兼容性
 
-RDS MySQL 原生复制实例的高权限账号具有 `RESET SLAVE`、`CHANGE MASTER TO`、`SET GLOBAL read_only=0` 权限。这意味着 Orchestrator 可以直接管理 RDS 实例的复制拓扑和故障恢复，ClawSQL 的 Skill 体系无需任何修改即可应用于跨云/混合云的 RDS MySQL 集群。
+## RDS MySQL Compatibility
+
+RDS MySQL native replication instances have high-privilege accounts with `RESET SLAVE`, `CHANGE MASTER TO`, `SET GLOBAL read_only=0` permissions. This means Orchestrator can directly manage RDS instance replication topology and failover, and ClawSQL's Skill system can be applied to cross-cloud/hybrid-cloud RDS MySQL clusters without any modifications.
 
 ## License
 
@@ -459,24 +468,41 @@ Apache License 2.0
 
 ### Webhook Integration Issues
 
-If the automatic failover via OpenClaw webhooks is not working:
+If automatic failover via OpenClaw webhooks is not working:
 
-1. **Check ANTHROPIC_API_KEY**: The webhook endpoint requires a valid Anthropic API key for AI processing. Set `ANTHROPIC_API_KEY` in your `.env` file or as an environment variable.
+1. **Check DASHSCOPE_API_KEY**: The webhook endpoint requires a valid DashScope API key for AI processing. Set `DASHSCOPE_API_KEY` in your environment:
+   ```bash
+   export DASHSCOPE_API_KEY=sk-your-key-here
+   ```
 
-2. **Verify OpenClaw config**: Run `bash scripts/init-openclaw.sh` to generate the correct configuration, then restart containers.
+2. **Verify OpenClaw gateway status**:
+   ```bash
+   openclaw gateway status
+   # Should show: Runtime: running, RPC probe: ok
+   ```
 
-3. **Check OpenClaw logs**: Run `docker logs clawsql-openclaw` and look for:
-   - `listening on ws://0.0.0.0:18789` - Gateway is running
-   - Webhook requests should appear in logs
+3. **Check OpenClaw is listening on port 3100**:
+   ```bash
+   ss -tlnp | grep 3100
+   # Should show listening on 127.0.0.1:3100
+   ```
 
-4. **Manual failover**: If webhooks fail, manually update ProxySQL routing:
+4. **Test webhook endpoint manually**:
+   ```bash
+   curl -X POST http://localhost:3100/hooks/agent \
+     -H 'Content-Type: application/json' \
+     -H 'Authorization: Bearer clawsql-webhook-secret' \
+     -d '{"skill":"mysql-health","request":"check health"}'
+   ```
+
+5. **Manual failover**: If webhooks fail, manually update ProxySQL routing:
    ```bash
    docker exec clawsql-proxysql mysql -h127.0.0.1 -P6032 -uadmin -padmin_pass \
      -e "DELETE FROM mysql_servers WHERE hostname='mysql-primary' AND hostgroup_id=10;
-         REPLACE INTO mysql_servers (hostgroup_id,hostname,port,weight,max_connections) 
+         REPLACE INTO mysql_servers (hostgroup_id,hostname,port,weight,max_connections)
          VALUES (20,'mysql-primary',3306,1000,200);
          DELETE FROM mysql_servers WHERE hostname='mysql-replica-2' AND hostgroup_id=20;
-         REPLACE INTO mysql_servers (hostgroup_id,hostname,port,weight,max_connections) 
+         REPLACE INTO mysql_servers (hostgroup_id,hostname,port,weight,max_connections)
          VALUES (10,'mysql-replica-2',3306,1000,200);
          LOAD MYSQL SERVERS TO RUNTIME;
          SAVE MYSQL SERVERS TO DISK;"
@@ -499,52 +525,6 @@ If replication shows `IO=Connecting` or errors:
    docker exec clawsql-replica-1 mysql -uroot -proot_pass -e "SHOW SLAVE STATUS\G"
    ```
    Look for `Slave_IO_Running: Yes` and `Slave_SQL_Running: Yes`.
-
-## Using Alibaba DashScope (Qwen Models) instead of Anthropic
-
-ClawSQL supports using Alibaba's DashScope API with Qwen models as an alternative to Anthropic Claude.
-
-### Option 1: Using DashScope API Key
-
-1. Get your API key from [Alibaba Cloud Model Studio](https://help.aliyun.com/zh/model-studio/)
-
-2. Set the environment variable before running setup:
-   ```bash
-   export DASHSCOPE_API_KEY=sk-your-key-here
-   bash scripts/init-openclaw.sh
-   bash scripts/setup.sh
-   ```
-
-3. Or create a `.env` file:
-   ```bash
-   cp .env.example .env
-   # Edit .env and set DASHSCOPE_API_KEY=sk-...
-   bash scripts/init-openclaw.sh
-   bash scripts/setup.sh
-   ```
-
-### Option 2: Using Qwen OAuth (Free Tier - 2,000 requests/day)
-
-```bash
-# Enable the Qwen plugin inside OpenClaw
-docker exec clawsql-openclaw openclaw plugins enable qwen-portal-auth
-
-# Run OAuth authentication
-docker exec clawsql-openclaw openclaw models auth login --provider qwen-portal --set-default
-
-# Restart OpenClaw
-docker restart clawsql-openclaw
-```
-
-### Available Qwen Models
-
-| Model ID | Description | Context Window |
-|----------|-------------|----------------|
-| `dashscope/qwen-plus` | Balanced Qwen model | 131K tokens |
-| `dashscope/qwen-max` | Most capable Qwen model | 32K tokens |
-| `dashscope/qwen-coder-plus` | Code-optimized Qwen | 131K tokens |
-| `qwen-portal/coder-model` | OAuth Qwen Coder | 2K requests/day |
-| `qwen-portal/vision-model` | OAuth Qwen Vision | 2K requests/day |
 
 ---
 
@@ -572,7 +552,7 @@ bash scripts/demo-runner.sh
 
 ### Sending Webhooks to OpenClaw
 
-You can interact with the OpenClaw AI agent via webhooks:
+Interact with the OpenClaw AI agent via webhooks:
 
 ```bash
 # Health check request
@@ -610,8 +590,8 @@ curl -X POST http://localhost:3100/hooks/agent \
 ### Step 1: Initial Setup
 
 ```bash
-# Set your API key
-echo "ANTHROPIC_API_KEY=sk-..." > .env
+# Set your DashScope API key
+export DASHSCOPE_API_KEY=sk-your-key-here
 
 # Start the cluster
 bash scripts/setup.sh
@@ -651,7 +631,7 @@ You should see all components healthy:
 docker exec clawsql-primary mysql -hproxysql -P6033 -uroot -proot_pass -e "
   -- This SELECT goes to a replica
   SELECT @@hostname as connected_host;
-  
+
   -- This INSERT goes to the primary
   CREATE DATABASE IF NOT EXISTS test;
   USE test;
@@ -761,7 +741,7 @@ done
 ```bash
 # Check which queries go to writer vs readers
 docker exec clawsql-proxysql mysql -h127.0.0.1 -P6032 -uadmin -padmin_pass -e "
-  SELECT hostgroup_id, hostname, status, max_connections 
+  SELECT hostgroup_id, hostname, status, max_connections
   FROM mysql_servers ORDER BY hostgroup_id
 "
 
@@ -856,7 +836,7 @@ bash scripts/teardown.sh
 | 6033 | ProxySQL (app) | `mysql -h localhost -P 6033 -uapp -papp_pass` |
 | 6032 | ProxySQL (admin) | `mysql -h localhost -P 6032 -uadmin -padmin_pass` |
 | 3000 | Orchestrator UI | http://localhost:3000 |
-| 3100 | OpenClaw UI | http://localhost:3100 |
+| 3100 | OpenClaw Gateway | http://localhost:3100 (loopback only) |
 
 ### Webhook Payloads
 
@@ -897,3 +877,13 @@ curl -X POST http://localhost:3000/api/graceful-master-takeover-auto/mysql-prima
   -H 'Content-Type: application/json' \
   -d '{"targetHost":"mysql-replica-1","targetPort":3306}'
 ```
+
+### Available DashScope Models
+
+| Model ID | Description | Context Window |
+|----------|-------------|----------------|
+| `dashscope/qwen-plus` | Balanced Qwen model (default) | 131K tokens |
+| `dashscope/qwen-max` | Most capable Qwen model | 32K tokens |
+| `dashscope/qwen-coder-plus` | Code-optimized Qwen | 131K tokens |
+
+Get your API key from [Alibaba Cloud Model Studio](https://help.aliyun.com/zh/model-studio/).
