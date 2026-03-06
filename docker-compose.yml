@@ -92,6 +92,14 @@ services:
     image: openarkcode/orchestrator:latest
     container_name: clawsql-orchestrator
     hostname: orchestrator
+    environment:
+      - ORC_TOPOLOGY_USER=orchestrator
+      - ORC_TOPOLOGY_PASSWORD=orch_pass
+      - ORC_DB_HOST=orchestrator-db
+      - ORC_DB_PORT=3306
+      - ORC_DB_NAME=orchestrator
+      - ORC_USER=orchestrator
+      - ORC_PASSWORD=orch_db_pass
     volumes:
       - ./config/orchestrator/orchestrator.conf.json:/etc/orchestrator.conf.json
     ports:
@@ -132,16 +140,19 @@ services:
       # OpenClaw config
       OPENCLAW_PORT: 18789
       OPENCLAW_HOST: 0.0.0.0
-      # Anthropic API key (required for AI processing)
+      # API keys for AI processing
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
-      # Cluster endpoints (available to all skills)
+      # Cluster endpoints (available to all skills via container networking)
       ORCHESTRATOR_URL: http://orchestrator:3000
       PROXYSQL_HOST: proxysql
       PROXYSQL_PORT: 6032
       PROXYSQL_USER: admin
       PROXYSQL_PASSWORD: admin_pass
-      CLUSTER_ALIAS: clawsql-demo
+      CLUSTER_ALIAS: mysql-primary:3306
+      # Gateway configuration for container networking
+      OPENCLAW_GATEWAY_MODE: local
+      OPENCLAW_BIND: 0.0.0.0
     volumes:
       - ./skills:/app/workspace/skills
       - ./config/openclaw:/home/node/.openclaw
@@ -152,6 +163,7 @@ services:
       - proxysql
     networks:
       - clawsql
+    restart: unless-stopped
 
 volumes:
   primary_data:

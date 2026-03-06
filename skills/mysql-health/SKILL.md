@@ -9,6 +9,8 @@ triggers:
   - type: cron
     schedule: "*/5 * * * *"
     description: Runs every 5 minutes to check cluster health
+  - type: chat
+    description: User asks about cluster health, MySQL status, or replication
 ---
 
 # MySQL Health Monitor
@@ -22,6 +24,13 @@ You are a MySQL DBA assistant performing a routine health check. Follow these st
 3. Call `check_replication_status` to get topology and replication lag
 4. Call `check_connection_pool` to get ProxySQL pool statistics
 5. Analyze all results together and produce a health report
+
+## Environment Variables
+
+- `ORCHESTRATOR_URL=http://orchestrator:3000` (inside container) or `http://localhost:3000` (direct)
+- `PROXYSQL_HOST=proxysql` (inside container) or `localhost` (direct)
+- `PROXYSQL_PORT=6032`
+- `CLUSTER_ALIAS=mysql-primary:3306`
 
 ## Analysis Guidelines
 

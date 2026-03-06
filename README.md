@@ -41,7 +41,7 @@ docker-compose.yml — 7 containers, 1 bridge network (clawsql)
 │                      ┌─────────────────┐                        │
 │                      │    openclaw     │                        │
 │                      │  (gateway)      │                        │
-│                      │  :3100          │                        │
+│                      │  port 18789     │                        │
 │                      │  skills mounted │                        │
 │                      └─────────────────┘                        │
 └──────────────────────────────────────────────────────────────────┘
@@ -53,7 +53,7 @@ Host port mapping:
   3000 → orchestrator:3000    (Web UI + REST API)
   6033 → proxysql:6033        (Application entry point)
   6032 → proxysql:6032        (Admin SQL)
-  3100 → openclaw:3100        (OpenClaw Gateway - loopback)
+  3100 → openclaw:18789       (OpenClaw Gateway)
 ```
 
 ### Failover Data Flow
@@ -73,7 +73,7 @@ The core path from failure detection to traffic routing:
         │
         ▼
   PostFailoverProcesses triggers webhook
-  POST http://openclaw:3100/hooks/agent
+  POST http://openclaw:18789/hooks/agent
   payload:
   ┌──────────────────────────────────────┐
   │ {                                    │
@@ -328,7 +328,7 @@ Hooks configuration — Orchestrator executes curl after recovery complete/faile
 
 ```
 PostFailoverProcesses:
-  → POST http://openclaw:3100/hooks/agent
+  → POST http://openclaw:18789/hooks/agent
   → JSON body with Authorization header: Bearer clawsql-webhook-secret + skill, failureType, failedHost/Port, successorHost/Port, isSuccessful, isMaster, etc.
 
 PostUnsuccessfulFailoverProcesses:
@@ -397,7 +397,7 @@ bash scripts/teardown.sh
 | 3000 | orchestrator | Web UI + REST API |
 | 6033 | proxysql | Application MySQL entry point (read/write split) |
 | 6032 | proxysql | Admin SQL interface |
-| 3100 | openclaw | OpenClaw Gateway (loopback only) |
+| 18789 | OpenClaw Gateway | http://localhost:18789 |
 
 ---
 
@@ -481,15 +481,15 @@ If automatic failover via OpenClaw webhooks is not working:
    # Should show: Runtime: running, RPC probe: ok
    ```
 
-3. **Check OpenClaw is listening on port 3100**:
+3. **Check OpenClaw is listening on port 18789**:
    ```bash
-   ss -tlnp | grep 3100
-   # Should show listening on 127.0.0.1:3100
+   ss -tlnp | grep 18789
+   # Should show listening on 0.0.0.0:18789
    ```
 
 4. **Test webhook endpoint manually**:
    ```bash
-   curl -X POST http://localhost:3100/hooks/agent \
+   curl -X POST http://localhost:18789/hooks/agent \
      -H 'Content-Type: application/json' \
      -H 'Authorization: Bearer clawsql-webhook-secret' \
      -d '{"skill":"mysql-health","request":"check health"}'
@@ -556,19 +556,19 @@ Interact with the OpenClaw AI agent via webhooks:
 
 ```bash
 # Health check request
-curl -X POST http://localhost:3100/hooks/agent \
+curl -X POST http://localhost:18789/hooks/agent \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer clawsql-webhook-secret' \
   -d '{"skill":"mysql-health","request":"check cluster health and provide analysis"}'
 
 # Topology request
-curl -X POST http://localhost:3100/hooks/agent \
+curl -X POST http://localhost:18789/hooks/agent \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer clawsql-webhook-secret' \
   -d '{"skill":"mysql-topology","request":"show current replication topology"}'
 
 # Switchover demo (promotes replica-1)
-curl -X POST http://localhost:3100/hooks/agent \
+curl -X POST http://localhost:18789/hooks/agent \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer clawsql-webhook-secret' \
   -d '{"skill":"mysql-demo","action":"switchover","target":"mysql-replica-1"}'
@@ -608,7 +608,7 @@ Expected output:
 ║  ProxySQL:       localhost:6033 (mysql)   ║
 ║  ProxySQL Admin: localhost:6032           ║
 ║  Orchestrator:   http://localhost:3000    ║
-║  OpenClaw:       http://localhost:3100    ║
+║  OpenClaw:       http://localhost:18789    ║
 ╚══════════════════════════════════════════╝
 ```
 
@@ -696,19 +696,19 @@ if data:
 
 ```bash
 # Ask for health analysis
-curl -X POST http://localhost:3100/hooks/agent \
+curl -X POST http://localhost:18789/hooks/agent \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer clawsql-webhook-secret' \
   -d '{"skill":"mysql-health","request":"analyze the cluster and report any issues"}'
 
 # Ask for topology visualization
-curl -X POST http://localhost:3100/hooks/agent \
+curl -X POST http://localhost:18789/hooks/agent \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer clawsql-webhook-secret' \
   -d '{"skill":"mysql-topology","request":"show me the replication topology in a tree format"}'
 
 # Ask for switchover assistance
-curl -X POST http://localhost:3100/hooks/agent \
+curl -X POST http://localhost:18789/hooks/agent \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer clawsql-webhook-secret' \
   -d '{"skill":"mysql-demo","request":"help me perform a controlled switchover to mysql-replica-1"}'
@@ -788,7 +788,7 @@ docker exec clawsql-proxysql mysql -h127.0.0.1 -P6032 -uadmin -padmin_pass -e "
 docker stop clawsql-replica-2
 
 # Ask OpenClaw to analyze
-curl -X POST http://localhost:3100/hooks/agent \
+curl -X POST http://localhost:18789/hooks/agent \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer clawsql-webhook-secret' \
   -d '{"skill":"mysql-health","request":"one replica seems down, analyze the situation"}'
@@ -836,25 +836,25 @@ bash scripts/teardown.sh
 | 6033 | ProxySQL (app) | `mysql -h localhost -P 6033 -uapp -papp_pass` |
 | 6032 | ProxySQL (admin) | `mysql -h localhost -P 6032 -uadmin -padmin_pass` |
 | 3000 | Orchestrator UI | http://localhost:3000 |
-| 3100 | OpenClaw Gateway | http://localhost:3100 (loopback only) |
+| 3100 | OpenClaw Gateway | http://localhost:18789 (loopback only) |
 
 ### Webhook Payloads
 
 ```bash
 # Health check
-curl -X POST http://localhost:3100/hooks/agent \
+curl -X POST http://localhost:18789/hooks/agent \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer clawsql-webhook-secret' \
   -d '{"skill":"mysql-health","request":"check health"}'
 
 # Topology
-curl -X POST http://localhost:3100/hooks/agent \
+curl -X POST http://localhost:18789/hooks/agent \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer clawsql-webhook-secret' \
   -d '{"skill":"mysql-topology","request":"show topology"}'
 
 # Switchover
-curl -X POST http://localhost:3100/hooks/agent \
+curl -X POST http://localhost:18789/hooks/agent \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer clawsql-webhook-secret' \
   -d '{"skill":"mysql-demo","action":"switchover","target":"mysql-replica-1"}'

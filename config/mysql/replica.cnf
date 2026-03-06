@@ -1,16 +1,14 @@
 [mysqld]
-server-id                      = 201
-port                           = 3306
-log_bin                        = mysql-bin
-binlog_format                  = ROW
-binlog_row_image               = FULL
-gtid_mode                      = ON
-enforce_gtid_consistency       = ON
-log_slave_updates              = ON
-relay_log                      = relay-bin
-relay_log_recovery             = ON
-read_only                      = 1
-super_read_only                = 0
-report_host                    = mysql-replica-1
-report_port                    = 3306
-innodb_buffer_pool_size        = 128M
+server-id=201
+gtid_mode=ON
+enforce_gtid_consistency=ON
+log-bin=mysql-bin
+binlog_format=ROW
+log_slave_updates=ON
+read_only=ON
+super_read_only=ON
+report-host=mysql-replica-1
+
+# Performance
+max_connections=200
+innodb_buffer_pool_size=256M
