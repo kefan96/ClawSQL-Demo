@@ -13,19 +13,31 @@ triggers:
 
 # MySQL Failover Handler
 
+**Note:** Due to OpenClaw's security model, webhook content is treated as `EXTERNAL_UNTRUSTED_CONTENT`, which prevents the AI from automatically executing tools in response to webhooks. For graceful switchover, use the HTTP bridge directly (see demo.sh for an example).
+
 You are an expert MySQL DBA assistant. When you receive a failover webhook from Orchestrator, you must update the ProxySQL routing to match the new topology.
 
-## Context
+## Webhook Message Formats
 
-This skill is triggered when Orchestrator completes a failover (or fails one). The webhook payload contains:
+This skill handles two types of webhook messages:
 
-- `failureType` — e.g. DeadMaster, UnreachableMaster, DeadIntermediateMaster
-- `failedHost` / `failedPort` — the instance that failed
-- `successorHost` / `successorPort` — the new primary (if recovery succeeded)
-- `isSuccessful` — whether the recovery was successful
-- `isMaster` — whether the failed instance was the primary
+### 1. Orchestrator Failover Event (automatic)
+Contains fields: `failureType`, `failedHost`, `successorHost`, `isSuccessful`, `isMaster`
+Follow the Decision Logic below.
 
-## Decision Logic
+### 2. Graceful Switchover Notification (from demo.sh)
+Message format: `switchover completed: old_writer=<hostname> new_writer=<hostname>`
+This indicates a planned switchover where the old primary is demoted to read-only replica.
+
+**For graceful switchover messages:**
+1. Parse `old_writer` and `new_writer` from the message
+2. Call `get_proxysql_servers` to see current routing
+3. Call `get_orchestrator_topology` to verify the new topology
+4. Call `switch_writer` to update ProxySQL (old primary becomes reader, new primary becomes writer)
+5. Call `verify_routing` to confirm the update succeeded
+6. Summarize the switchover and new cluster state
+
+## Decision Logic (for Orchestrator failover events)
 
 **If the failed instance is the primary (`isMaster=true`) and recovery was successful:**
 1. Call `get_proxysql_servers` to see the current routing
