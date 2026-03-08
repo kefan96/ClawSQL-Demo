@@ -218,6 +218,39 @@ print(f\"{sk.get('Hostname','?')}:{sk.get('Port','?')}\")
       echo "    Start with: node scripts/proxysql-http-bridge.mjs"
     fi
 
+    # Reconfigure old primary as a replica of the new primary
+    echo "▶ Reconfiguring old primary ($old_writer_host) as replica..."
+    # Wait a moment for old primary to be ready after switchover
+    sleep 2
+    # Reconfigure replication with retry
+    for attempt in 1 2 3; do
+      if podman exec "$old_writer_host" mysql -uroot -proot_pass -e "
+STOP SLAVE;
+RESET SLAVE ALL;
+CHANGE MASTER TO
+  MASTER_HOST='$new_primary_host',
+  MASTER_PORT=3306,
+  MASTER_USER='repl',
+  MASTER_PASSWORD='repl_pass',
+  MASTER_AUTO_POSITION=1;
+START SLAVE;
+" 2>&1 | grep -qv "Warning"; then
+        # Verify replication started
+        sleep 1
+        repl_status=$(podman exec "$old_writer_host" mysql -uroot -proot_pass -N -e "SHOW SLAVE STATUS\G" 2>/dev/null | grep -E "Slave_IO_Running|Slave_SQL_Running" | awk '{print $2}' | sort -u)
+        if [ "$repl_status" = "Yes" ]; then
+          echo "  ✓ Replication configured and running on $old_writer_host -> $new_primary_host"
+          break
+        else
+          echo "  ⚠ Attempt $attempt: Replication threads not running, retrying..."
+          sleep 2
+        fi
+      else
+        echo "  ⚠ Attempt $attempt: Could not reconfigure replication, retrying..."
+        sleep 2
+      fi
+    done
+
     echo "  Waiting for topology and routing to update..."
     sleep 3
     show_topology
