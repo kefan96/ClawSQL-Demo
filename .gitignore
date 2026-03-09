@@ -1,3 +1,27 @@
 node_modules/
 .env
 *.log
+
+# OpenClaw runtime/generated files
+config/openclaw/logs/
+config/openclaw/canvas/
+config/openclaw/cron/
+config/openclaw/update-check.json
+config/openclaw/agents/**/agent/
+config/openclaw/agents/**/auth-profiles.json
+config/openclaw/agents/**/sessions/*.jsonl
+config/openclaw/agents/**/sessions/sessions.json
+config/openclaw/workspace/.git/
+config/openclaw/workspace/.openclaw/
+*.bak
+*.bak.*
+
+# Build artifacts
+dist/
+*.tsbuildinfo
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
