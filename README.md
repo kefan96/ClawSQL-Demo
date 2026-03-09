@@ -288,6 +288,70 @@ SAVE MYSQL SERVERS TO DISK;
 
 ---
 
+## Shared Bash Library
+
+Action scripts share common functions via `scripts/lib/common.sh`:
+
+| Function | Purpose |
+|----------|---------|
+| `get_runtime` | Detect container runtime (podman/docker) |
+| `get_cluster_alias` | Get cluster alias from Orchestrator (finds writable primary) |
+| `hostname_to_container` | Map MySQL hostname to container name (`mysql-primary` → `clawsql-primary`) |
+| `container_to_hostname` | Map container name to MySQL hostname |
+| `get_current_primary` | Get current primary hostname from Orchestrator |
+| `get_replicas` | Get all replica hostnames from Orchestrator |
+| `get_proxysql_writer` | Get current writer from ProxySQL via HTTP bridge |
+| `sync_proxysql_routing` | Sync ProxySQL routing with Orchestrator topology |
+| `show_proxysql_routing` | Display ProxySQL routing table |
+| `check_multi_master` | Detect multi-master condition (writable count) |
+| `wait_mysql_ready` | Wait for MySQL to respond to ping |
+
+Usage example:
+
+```bash
+source scripts/lib/common.sh
+
+RUNTIME=$(get_runtime)
+cluster=$(get_cluster_alias "http://localhost:3000")
+primary=$(get_current_primary "$cluster" "http://localhost:3000")
+
+# Sync ProxySQL with Orchestrator
+sync_proxysql_routing "http://localhost:3000" "http://localhost:9090"
+```
+
+---
+
+## ProxySQL HTTP Bridge
+
+A lightweight HTTP API for ProxySQL admin operations (`scripts/proxysql-http-bridge.mjs`):
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/servers` | GET | List all servers in mysql_servers table |
+| `/switch-writer` | POST | Atomic writer switch (4-step operation) |
+| `/add-server` | POST | Add server to hostgroup |
+| `/remove-server` | POST | Remove server from all hostgroups |
+| `/sync-topology` | POST | Sync routing with Orchestrator topology |
+
+### /sync-topology Endpoint
+
+The `/sync-topology` endpoint queries Orchestrator for the current primary and replicas, then updates ProxySQL to match:
+
+```bash
+curl -X POST http://localhost:9090/sync-topology
+# Response:
+{
+  "success": true,
+  "primary": "mysql-primary",
+  "replicas": ["mysql-replica-1", "mysql-replica-2"],
+  "actions": ["Switched writer: mysql-replica-1 -> mysql-primary"]
+}
+```
+
+This ensures ProxySQL routing stays consistent with Orchestrator topology after failover/switchover operations.
+
+---
+
 ## Infrastructure Configuration
 
 ### MySQL Cluster
