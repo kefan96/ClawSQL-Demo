@@ -251,8 +251,14 @@ START SLAVE;
       fi
     done
 
+    # Force Orchestrator to refresh topology immediately
+    echo "▶ Refreshing Orchestrator topology..."
+    curl -sf "$ORCH_URL/api/forget/$old_writer_host/3306" > /dev/null 2>&1 || true
+    curl -sf "$ORCH_URL/api/discover/$new_primary_host/3306" > /dev/null 2>&1 || true
+    sleep 6  # Wait for Orchestrator to poll and update (InstancePollSeconds=5)
+
     echo "  Waiting for topology and routing to update..."
-    sleep 3
+    sleep 2
     show_topology
     show_routing
   else
