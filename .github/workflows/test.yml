@@ -1,0 +1,234 @@
+name: Test
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Unit Tests - Always run, no external dependencies
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run unit tests
+        run: npm run test:unit
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage/lcov.info
+          fail_ci_if_error: false
+
+  # Integration Tests - Require MySQL and ProxySQL containers
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root_pass
+          MYSQL_DATABASE: test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+      proxysql:
+        image: proxysql/proxysql:2.6.3
+        ports:
+          - 6032:6032
+          - 6033:6033
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -P 6032 -u admin -padmin"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Wait for MySQL
+        run: |
+          for i in {1..30}; do
+            if mysqladmin ping -h 127.0.0.1 -P 3306 -u root -proot_pass --silent 2>/dev/null; then
+              echo "MySQL is ready"
+              break
+            fi
+            echo "Waiting for MySQL... ($i/30)"
+            sleep 2
+          done
+
+      - name: Wait for ProxySQL
+        run: |
+          for i in {1..30}; do
+            if mysqladmin ping -h 127.0.0.1 -P 6032 -u admin -padmin --silent 2>/dev/null; then
+              echo "ProxySQL is ready"
+              break
+            fi
+            echo "Waiting for ProxySQL... ($i/30)"
+            sleep 2
+          done
+
+      - name: Run integration tests
+        run: npm run test:integration
+        env:
+          CLAWSQL_MYSQL_HOST: 127.0.0.1
+          CLAWSQL_MYSQL_PORT: '3306'
+          CLAWSQL_MYSQL_USER: root
+          CLAWSQL_MYSQL_PASSWORD: root_pass
+          CLAWSQL_PROXYSQL_HOST: 127.0.0.1
+          CLAWSQL_PROXYSQL_ADMIN_PORT: '6032'
+          CLAWSQL_PROXYSQL_DATA_PORT: '6033'
+          CLAWSQL_PROXYSQL_USER: admin
+          CLAWSQL_PROXYSQL_PASSWORD: admin
+          RUN_INTEGRATION_TESTS: 'true'
+
+  # E2E Tests - Full system tests
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Start services with Docker Compose
+        run: docker-compose up -d
+        env:
+          MYSQL_ROOT_PASSWORD: root_pass
+
+      - name: Wait for services
+        run: sleep 30
+
+      - name: Start API server
+        run: npm run serve &
+        env:
+          CLAWSQL_MYSQL_PASSWORD: root_pass
+          CLAWSQL_API_PORT: '8080'
+
+      - name: Wait for API
+        run: |
+          for i in {1..30}; do
+            if curl -s http://localhost:8080/health > /dev/null; then
+              echo "API is ready"
+              break
+            fi
+            echo "Waiting for API... ($i/30)"
+            sleep 2
+          done
+
+      - name: Run E2E tests
+        run: npm run test:e2e
+        env:
+          CLAWSQL_MYSQL_PASSWORD: root_pass
+          CLAWSQL_API_HOST: localhost
+          CLAWSQL_API_PORT: '8080'
+          RUN_E2E_TESTS: 'true'
+
+      - name: Stop services
+        if: always()
+        run: docker-compose down -v
+
+  # Lint and Type Check
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true
+
+  # Build check
+  build:
+    name: Build Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7

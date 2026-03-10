@@ -1,0 +1,8 @@
+ai:
+  provider: "anthropic"
+  apiKey: "sk-65bfa28e06a843c7bc50808df69e94ea"
+  model: "glm-5"
+  features:
+    analysis: true
+    recommendations: true
+    naturalLanguage: true

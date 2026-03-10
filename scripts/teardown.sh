@@ -16,6 +16,9 @@ echo "║        ClawSQL — Teardown                ║"
 echo "╚══════════════════════════════════════════╝"
 echo ""
 
+echo "▶ Stopping ProxySQL HTTP Bridge..."
+pkill -f proxysql-http-bridge 2>/dev/null || true
+
 echo "▶ Stopping and removing containers..."
 $RUNTIME compose down -v --remove-orphans
 

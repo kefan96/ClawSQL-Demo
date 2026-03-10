@@ -137,7 +137,14 @@ elif [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
 {
   "commands": {"native": "auto", "nativeSkills": "auto", "restart": true, "ownerDisplay": "raw"},
   "gateway": {"mode": "local", "bind": "lan", "port": 18789, "auth": {"mode": "token", "token": "clawsql-token"}, "controlUi": {"allowedOrigins": ["http://localhost:18789", "http://127.0.0.1:18789"]}},
-  "models": {},
+  "models": {
+    "providers": {
+      "anthropic": {
+        "apiKey": "${ANTHROPIC_API_KEY}",
+        "models": [{"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "input": ["text"], "reasoning": false}]
+      }
+    }
+  },
   "hooks": {
     "enabled": true, "token": "clawsql-webhook-secret", "path": "/hooks",
     "maxBodyBytes": 262144, "defaultSessionKey": "hook:orchestrator",
@@ -150,6 +157,23 @@ EOF
   echo "  ✓ OpenClaw config created (Anthropic)"
 else
   echo "  ⚠ No API key found - create config/openclaw/openclaw.json manually"
+fi
+
+# Step 9: Start ProxySQL HTTP Bridge
+echo ""
+echo "▶ Starting ProxySQL HTTP Bridge..."
+# Kill any existing bridge process
+pkill -f proxysql-http-bridge 2>/dev/null || true
+sleep 1
+# Start the bridge in background
+node "$PROJECT_DIR/scripts/proxysql-http-bridge.mjs" &
+BRIDGE_PID=$!
+sleep 2
+# Verify bridge is running
+if curl -sf http://localhost:9090/servers > /dev/null 2>&1; then
+  echo "  ✓ ProxySQL HTTP Bridge running (PID: $BRIDGE_PID)"
+else
+  echo "  ⚠ ProxySQL HTTP Bridge failed to start"
 fi
 
 echo ""

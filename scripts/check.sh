@@ -48,11 +48,18 @@ if curl -sf "$ORCH_URL/api/health" > /dev/null 2>&1; then
   clusters=$(curl -sf "$ORCH_URL/api/clusters" 2>/dev/null || echo "")
   if [ -n "$clusters" ] && [ "$clusters" != "[]" ]; then
     echo "  Clusters: $clusters"
-    topology=$(curl -sf "$ORCH_URL/api/cluster/alias/mysql-primary:3306" 2>/dev/null)
-    if [ -n "$topology" ] && echo "$topology" | grep -q '"Key"'; then
-      primary=$(echo "$topology" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0]['Key']['Hostname'] if d and isinstance(d,list) and len(d)>0 else 'N/A')" 2>/dev/null || echo "?")
-      replicas=$(echo "$topology" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d[0].get('Replicas',[])) if d and isinstance(d,list) and len(d)>0 else 0)" 2>/dev/null || echo "?")
-      echo "  Topology: Primary=$primary, Replicas=$replicas"
+    # Get the first cluster alias dynamically
+    cluster_alias=$(echo "$clusters" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0] if d else '')" 2>/dev/null)
+    if [ -n "$cluster_alias" ]; then
+      topology=$(curl -sf "$ORCH_URL/api/cluster/${cluster_alias}" 2>/dev/null)
+      if [ -n "$topology" ] && grep -q '"Key"' <<< "$topology"; then
+        # Find the writable instance (actual primary) and count replicas
+        primary=$(echo "$topology" | python3 -c "import sys,json; d=json.load(sys.stdin); p=[i for i in d if not i.get('ReadOnly')]; print(p[0]['Key']['Hostname'] if p else 'N/A')" 2>/dev/null || echo "?")
+        replicas=$(echo "$topology" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len([i for i in d if i.get('ReadOnly')]))" 2>/dev/null || echo "?")
+        echo "  Topology: Primary=$primary, Replicas=$replicas"
+      else
+        echo "  Topology: (unable to fetch)"
+      fi
     fi
   else
     echo "  No clusters discovered yet"
@@ -64,13 +71,18 @@ echo ""
 
 # ProxySQL
 echo "ProxySQL:"
-if $RUNTIME exec clawsql-proxysql mysql -h127.0.0.1 -P6032 -uadmin -padmin_pass -e "SELECT 1" > /dev/null 2>&1; then
-  echo "  ✓ Admin reachable"
+# Try HTTP bridge first (more reliable than admin interface)
+if curl -sf http://localhost:9090/servers > /dev/null 2>&1; then
+  echo "  ✓ HTTP bridge reachable"
+  routing=$(curl -sf http://localhost:9090/servers 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); servers=d.get('servers',[]); w=len([s for s in servers if s['hostgroup_id']==10]); r=len([s for s in servers if s['hostgroup_id']==20]); print(f'HG10(writers)={w}, HG20(readers)={r}')" 2>/dev/null || echo "?")
+  echo "  $routing"
+elif $RUNTIME exec clawsql-proxysql mysql -h127.0.0.1 -P6032 -uadmin -padmin_pass -e "SELECT 1" > /dev/null 2>&1; then
+  echo "  ✓ Admin reachable (direct)"
   writers=$($RUNTIME exec clawsql-proxysql mysql -h127.0.0.1 -P6032 -uadmin -padmin_pass -N -e "SELECT COUNT(*) FROM mysql_servers WHERE hostgroup_id=10 AND status='ONLINE'" 2>/dev/null || echo "?")
   readers=$($RUNTIME exec clawsql-proxysql mysql -h127.0.0.1 -P6032 -uadmin -padmin_pass -N -e "SELECT COUNT(*) FROM mysql_servers WHERE hostgroup_id=20 AND status='ONLINE'" 2>/dev/null || echo "?")
   echo "  Routing: HG10(writers)=$writers, HG20(readers)=$readers"
 else
-  echo "  ✗ Unreachable at port 6032"
+  echo "  ✗ Unreachable (bridge down, admin auth issue?)"
 fi
 echo ""
 

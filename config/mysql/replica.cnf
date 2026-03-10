@@ -6,7 +6,6 @@ log-bin=mysql-bin
 binlog_format=ROW
 log_slave_updates=ON
 read_only=ON
-super_read_only=ON
 report-host=mysql-replica-1
 
 # Performance
