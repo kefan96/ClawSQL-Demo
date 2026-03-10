@@ -8,20 +8,28 @@ import { createMockMySQLProvider } from '../../helpers/mock-mysql.js';
 import { createMockProxySQLProvider } from '../../helpers/mock-proxysql.js';
 import { mockInstance, mockReplicaInstance, mockReplicationStatus } from '../../helpers/fixtures.js';
 
-// Mock providers
+// Create module-level mock functions
+const mockGetMySQLProvider = vi.fn();
+const mockResetMySQLProvider = vi.fn();
+const mockGetProxySQLProvider = vi.fn();
+const mockResetProxySQLProvider = vi.fn();
+const mockGetTopologyService = vi.fn();
+const mockResetTopologyService = vi.fn();
+
+// Mock at module level
 vi.mock('../../src/providers/mysql.js', () => ({
-  getMySQLProvider: vi.fn(),
-  resetMySQLProvider: vi.fn(),
+  getMySQLProvider: () => mockGetMySQLProvider(),
+  resetMySQLProvider: () => mockResetMySQLProvider(),
 }));
 
 vi.mock('../../src/providers/proxysql.js', () => ({
-  getProxySQLProvider: vi.fn(),
-  resetProxySQLProvider: vi.fn(),
+  getProxySQLProvider: () => mockGetProxySQLProvider(),
+  resetProxySQLProvider: () => mockResetProxySQLProvider(),
 }));
 
 vi.mock('../../src/services/topology.js', () => ({
-  getTopologyService: vi.fn(),
-  resetTopologyService: vi.fn(),
+  getTopologyService: () => mockGetTopologyService(),
+  resetTopologyService: () => mockResetTopologyService(),
 }));
 
 describe('HealthService', () => {
@@ -30,7 +38,7 @@ describe('HealthService', () => {
   let mockProxySQLProvider: ReturnType<typeof createMockProxySQLProvider>;
   let mockTopologyService: any;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     resetHealthService();
 
     mockMySQLProvider = createMockMySQLProvider();
@@ -45,13 +53,10 @@ describe('HealthService', () => {
       })),
     };
 
-    const { getMySQLProvider } = await vi.importMock('../../src/providers/mysql.js');
-    const { getProxySQLProvider } = await vi.importMock('../../src/providers/proxysql.js');
-    const { getTopologyService } = await vi.importMock('../../src/services/topology.js');
-
-    getMySQLProvider.mockReturnValue(mockMySQLProvider);
-    getProxySQLProvider.mockReturnValue(mockProxySQLProvider);
-    getTopologyService.mockReturnValue(mockTopologyService);
+    // Configure mock return values
+    mockGetMySQLProvider.mockReturnValue(mockMySQLProvider);
+    mockGetProxySQLProvider.mockReturnValue(mockProxySQLProvider);
+    mockGetTopologyService.mockReturnValue(mockTopologyService);
 
     service = new HealthService();
   });
@@ -252,8 +257,28 @@ describe('HealthService', () => {
 });
 
 describe('Singleton functions', () => {
+  let mockMySQLProvider: ReturnType<typeof createMockMySQLProvider>;
+  let mockProxySQLProvider: ReturnType<typeof createMockProxySQLProvider>;
+  let mockTopologyService: any;
+
   beforeEach(() => {
     resetHealthService();
+
+    mockMySQLProvider = createMockMySQLProvider();
+    mockProxySQLProvider = createMockProxySQLProvider();
+    mockTopologyService = {
+      getTopology: vi.fn(() => ({
+        clusterName: 'test-cluster',
+        primary: mockInstance,
+        replicas: [],
+        problems: [],
+        lastUpdated: new Date(),
+      })),
+    };
+
+    mockGetMySQLProvider.mockReturnValue(mockMySQLProvider);
+    mockGetProxySQLProvider.mockReturnValue(mockProxySQLProvider);
+    mockGetTopologyService.mockReturnValue(mockTopologyService);
   });
 
   afterEach(() => {
@@ -261,17 +286,6 @@ describe('Singleton functions', () => {
   });
 
   it('should create singleton instance', () => {
-    // Need to mock providers first
-    vi.doMock('../../src/providers/mysql.js', () => ({
-      getMySQLProvider: vi.fn(() => createMockMySQLProvider()),
-    }));
-    vi.doMock('../../src/providers/proxysql.js', () => ({
-      getProxySQLProvider: vi.fn(() => createMockProxySQLProvider()),
-    }));
-    vi.doMock('../../src/services/topology.js', () => ({
-      getTopologyService: vi.fn(() => mockTopologyService),
-    }));
-
     const service = getHealthService();
     expect(service).toBeInstanceOf(HealthService);
 
@@ -280,8 +294,13 @@ describe('Singleton functions', () => {
   });
 
   it('should reset singleton', () => {
+    getHealthService();
     resetHealthService();
-    // After reset, a new instance should be created
+
+    mockGetMySQLProvider.mockReturnValue(mockMySQLProvider);
+    mockGetProxySQLProvider.mockReturnValue(mockProxySQLProvider);
+    mockGetTopologyService.mockReturnValue(mockTopologyService);
+
     const newService = getHealthService();
     expect(newService).toBeInstanceOf(HealthService);
   });

@@ -13,22 +13,15 @@ import {
 import { createMockMySQLProvider } from '../../helpers/mock-mysql.js';
 import { mockInstance, mockReplicaInstance, mockReplicationStatus } from '../../helpers/fixtures.js';
 
-// Mock providers - we'll configure them in beforeEach
+// Create module-level mock functions
 const mockGetMySQLProvider = vi.fn();
 const mockResetMySQLProvider = vi.fn();
-const mockGetProxySQLProvider = vi.fn();
-const mockResetProxySQLProvider = vi.fn();
 const mockGetMemoryService = vi.fn();
 const mockGetSQLService = vi.fn();
 
 vi.mock('../../src/providers/mysql.js', () => ({
   getMySQLProvider: () => mockGetMySQLProvider(),
   resetMySQLProvider: () => mockResetMySQLProvider(),
-}));
-
-vi.mock('../../src/providers/proxysql.js', () => ({
-  getProxySQLProvider: () => mockGetProxySQLProvider(),
-  resetProxySQLProvider: () => mockResetProxySQLProvider(),
 }));
 
 vi.mock('../../src/services/memory.js', () => ({
@@ -376,9 +369,11 @@ describe('TopologyService', () => {
 
       service.startPolling(1000);
 
-      await vi.runAllTimersAsync();
+      // Initial discovery happens immediately but async
+      await vi.advanceTimersByTimeAsync(0);
       expect(mockMySQLProvider.discoverInstances).toHaveBeenCalledTimes(1);
 
+      // Advance timer to trigger next poll
       await vi.advanceTimersByTimeAsync(1000);
       expect(mockMySQLProvider.discoverInstances).toHaveBeenCalledTimes(2);
 
@@ -391,11 +386,13 @@ describe('TopologyService', () => {
       ]);
 
       service.startPolling(1000);
-      await vi.runAllTimersAsync();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockMySQLProvider.discoverInstances).toHaveBeenCalledTimes(1);
 
       service.stopPolling();
 
       await vi.advanceTimersByTimeAsync(5000);
+      // Should not have polled again after stopping
       expect(mockMySQLProvider.discoverInstances).toHaveBeenCalledTimes(1);
     });
   });
@@ -407,18 +404,24 @@ describe('TopologyService', () => {
       ]);
 
       service.startPolling(1000);
+      await vi.advanceTimersByTimeAsync(0);
+
       await service.destroy();
 
       await vi.advanceTimersByTimeAsync(5000);
+      // Should not have polled again after destroy
       expect(mockMySQLProvider.discoverInstances).toHaveBeenCalledTimes(1);
     });
   });
 });
 
 describe('Singleton functions', () => {
+  let mockMySQLProvider: ReturnType<typeof createMockMySQLProvider>;
+
   beforeEach(() => {
     resetTopologyService();
-    mockGetMySQLProvider.mockReturnValue(createMockMySQLProvider());
+    mockMySQLProvider = createMockMySQLProvider();
+    mockGetMySQLProvider.mockReturnValue(mockMySQLProvider);
   });
 
   afterEach(() => {

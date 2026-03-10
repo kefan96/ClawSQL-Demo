@@ -67,10 +67,14 @@ mysql:
 
     it('should throw validation error for invalid config', () => {
       const configPath = resolve(TEST_CONFIG_DIR, 'invalid.yaml');
+      // Write config with invalid type (api.port must be a positive number)
       writeFileSync(configPath, `
 cluster:
   name: test-cluster
-  # missing seeds - should fail validation
+  seeds:
+    - mysql-primary:3306
+api:
+  port: -1
       `);
 
       expect(() => loadConfig(configPath)).toThrow(
@@ -193,10 +197,12 @@ cluster:
     });
 
     it('should load default config if not previously loaded', () => {
-      // This test assumes config/default.yaml exists or tests the error
+      // This test assumes config/default.yaml exists
       resetConfig();
-      // Without a default config or explicit load, this might throw
-      // depending on the implementation
+      // getConfig() will try to load default config
+      const config = getConfig();
+      expect(config).toBeDefined();
+      expect(config.cluster.name).toBe('clawsql-demo');
     });
   });
 
@@ -213,9 +219,10 @@ cluster:
       loadConfig(configPath);
       resetConfig();
 
-      // After reset, getConfig should try to load again
-      // This tests that the cache was cleared
-      expect(() => getConfig()).toThrow();
+      // After reset, getConfig will load the default config
+      const config = getConfig();
+      // Default config has different cluster name
+      expect(config.cluster.name).toBe('clawsql-demo');
     });
   });
 
